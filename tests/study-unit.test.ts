@@ -791,6 +791,59 @@ describe("studyUnit Playwright fallback", () => {
     );
   });
 
+  // seek_near_end means "jump to the end of the media"; skip_to_end is its
+  // positive form. Inverting the mapping silently keeps the fast path and the
+  // platform never credits the unit, so pin the direction down.
+  test("skip_to_end maps to seek_near_end without inversion", async () => {
+    const seen: boolean[] = [];
+    const { http } = recordingHttp((input) => {
+      const warmed = warmupOk(input);
+      if (warmed != null) {
+        return warmed;
+      }
+      if (input.url.startsWith(TERM_RPC_URL)) {
+        return { statusCode: 200, body: mocTermBody(CATALOG_WITH_VIDEO_META) };
+      }
+      if (input.url.startsWith(LEARN_VO_RPC_URL)) {
+        return {
+          statusCode: 200,
+          body: JSON.stringify({ code: 0, result: { duration: 120, videoId: 9001 } }),
+        };
+      }
+      throw new Error(`unexpected url ${input.url}`);
+    });
+
+    for (const skipToEnd of [undefined, false] as const) {
+      await studyUnit(
+        {
+          course_id: "1001",
+          term_id: "2001",
+          unit_id: "401",
+          school_short_name: "SJTU",
+          transport: "playwright",
+          ...(skipToEnd === undefined ? {} : { skip_to_end: skipToEnd }),
+        },
+        {
+          ...portsWith(async () => SESSION, http),
+          studyPlaywright: {
+            async studyUnitInBrowser(args) {
+              seen.push(args.seek_near_end !== false);
+              return {
+                kind: "completed",
+                learned_sec: 120,
+                duration_sec: 120,
+                page_count: null,
+                percent: 100,
+              };
+            },
+          },
+        },
+      );
+    }
+
+    assert.deepEqual(seen, [true, false]);
+  });
+
   test("playwright video quiz popup returns needs_quiz_assist without submit", async () => {
     const { http } = recordingHttp((input) => {
       const warmed = warmupOk(input);

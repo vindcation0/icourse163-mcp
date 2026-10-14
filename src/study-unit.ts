@@ -951,7 +951,8 @@ async function runPlaywrightStudy(input: {
       content_type: located.content_type,
       playback_rate: playbackRate,
       page_interval_sec: pageIntervalSec,
-      seek_near_end: !skipToEnd,
+      // seek_near_end means "jump to the end"; skip_to_end is its positive form.
+      seek_near_end: skipToEnd,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
