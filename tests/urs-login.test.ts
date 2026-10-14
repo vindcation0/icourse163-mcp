@@ -276,7 +276,7 @@ describe("ursLogin", () => {
     );
   });
 
-  test("reports a slider-captcha demand distinctly from a bad request", async () => {
+  test("rejects 401/dt=02 with the corrected reading, not 'captcha'", async () => {
     const { http } = fakeUrs((path) => {
       if (path.endsWith("/ini")) return { body: { ret: "201" } };
       if (path.endsWith("/powGetP")) return { body: { ret: "201", pVInfo: PUZZLE } };
@@ -285,10 +285,37 @@ describe("ursLogin", () => {
     });
     const result = await ursLogin({ account: "x", password: "y", http, now: () => 0 });
     assert.equal(result.ok, false);
-    assert.equal(result.needsCaptcha, true);
     assert.equal(result.ret, "401");
-    assert.match(result.message, /slider captcha/);
-    assert.match(result.message, /npm run login/);
+    // 401 is NOT one of the captcha codes: the client's slide handler runs for every
+    // code, which is what made this look like a captcha demand.
+    assert.equal(result.needsCaptcha, false);
+    assert.match(result.message, /--channel phone/);
+    assert.match(result.message, /hides the 网易邮箱账号登录/);
+  });
+
+  test("flags the codes the bundle treats as a captcha demand", async () => {
+    for (const code of ["441", "444", "445", "447"]) {
+      const { http } = fakeUrs((path) => {
+        if (path.endsWith("/ini")) return { body: { ret: "201" } };
+        if (path.endsWith("/powGetP")) return { body: { ret: "201", pVInfo: PUZZLE } };
+        if (path.endsWith("/gt")) return { body: { ret: "201", tk: "tk" } };
+        return { body: { ret: code } };
+      });
+      const result = await ursLogin({ account: "x", password: "y", http, now: () => 0 });
+      assert.equal(result.needsCaptcha, true, `code ${code} should be a captcha code`);
+    }
+  });
+
+  test("a non-captcha rejection is not flagged as one", async () => {
+    const { http } = fakeUrs((path) => {
+      if (path.endsWith("/ini")) return { body: { ret: "201" } };
+      if (path.endsWith("/powGetP")) return { body: { ret: "201", pVInfo: PUZZLE } };
+      if (path.endsWith("/gt")) return { body: { ret: "201", tk: "tk" } };
+      return { body: { ret: "423" } };
+    });
+    const result = await ursLogin({ account: "x", password: "y", http, now: () => 0 });
+    assert.equal(result.needsCaptcha, false);
+    assert.equal(result.ret, "423");
   });
 
   test("explains a powGetP rejection as a missing cookie", async () => {

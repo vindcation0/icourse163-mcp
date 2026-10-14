@@ -28,8 +28,14 @@ RSA-encrypted password.
 The password is read from a hidden prompt unless ICOURSE163_PASSWORD is set, and is
 only ever sent RSA-encrypted inside an SM4 envelope.
 
-If the site answers 401/dt=02 it is asking for a slider captcha; this command cannot
-solve one, so it exits non-zero and tells you to use \`npm run login\` instead.
+Use --channel phone, which is the default and the only channel icourse163 offers: its
+login UI hides the 网易邮箱账号登录 tab, and the email channel is rejected at submit
+with 401/dt=02 even though gt accepts the same account and issues a ticket.
+
+The handshake (ini, powGetP, VDF, gt) is verified against live traffic. Whether a real
+account completes at submit is NOT verified here — that needs your credentials, so run
+it yourself. If the site asks for a captcha (ret 441/444/445/447), this command cannot
+satisfy it; use \`npm run login\` instead.
 `;
 
 export type UrsLoginCliIo = {
@@ -192,10 +198,18 @@ export async function runUrsLoginCli(input: {
     }
     input.io.stderr.write(`${safe(result.message)}\n`);
     input.io.stderr.write(`  阶段=${result.stage} ret=${result.ret ?? "-"} dt=${result.dt ?? "-"}\n`);
-    if (result.needsCaptcha) {
+    if (result.ret === "401" && result.dt === "02") {
       input.io.stderr.write(
-        "  该账号被要求滑动验证码。这是站点的自适应风控，不是请求构造错误；\n" +
-          "  请改用浏览器登录：npm run login\n",
+        "  服务端在提交这一步拒了这个账号。注意：icourse163 的登录界面上「网易邮箱账号登录」\n" +
+          "  那个标签是隐藏的，邮箱通道对本产品未开放，所以邮箱通道拿不到成功结果 —— 这不是\n" +
+          "  请求构造的问题（同一个账号在 gt 那一步是能拿到 ticket 的）。\n" +
+          "  请用手机通道配合你的真实账号重试：npm run login:http --silent -- -u <手机号>\n" +
+          "  或直接用浏览器登录：npm run login\n",
+      );
+    } else if (result.needsCaptcha) {
+      input.io.stderr.write(
+        "  服务端要求验证码（这是 _isCapCode 认定的验证码码）。这属于自适应风控，\n" +
+          "  需要人机交互，请改用浏览器登录：npm run login\n",
       );
     }
     return 1;

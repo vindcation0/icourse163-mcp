@@ -7,7 +7,11 @@ import { createCipheriv, publicEncrypt, constants } from "node:crypto";
  * (the bundle the login iframe loads for pkid=cjJVGQM / product=imooc). Every
  * constant and algorithm below was checked against captured traffic or against the
  * site's own code; see docs/adr/0005-urs-http-login.md for the evidence, the
- * verification method, and the one step that remains unknown.
+ * verification method, and what could not be verified.
+ *
+ * The handshake is verified working; the final submit is not, because the only
+ * credential-free channel (email) is not offered by icourse163 for this product.
+ * See the note on `ursLogin`'s result for the exact boundary.
  *
  * Flow (all POST, body `{"encParams": <SM4 hex>}` unless noted):
  *   1. /dl/zj/{yd|mail}/ini      -> {ret, capFlag, pv, capId}
@@ -220,7 +224,7 @@ export type UrsLoginResult = {
   ret: string | null;
   dt: string | null;
   message: string;
-  /** `401` + `dt:"02"` is the server asking for a slider captcha, not a bad request. */
+  /** True only for the codes the bundle's `_$isCapCode` treats as a captcha demand. */
   needsCaptcha: boolean;
   /** The session cookie header produced by a successful login, or "". */
   cookie: string;
@@ -243,6 +247,17 @@ const RESPONSE_MESSAGES: Record<string, string> = {
   "402": "指纹错误",
   "423": "风控账号",
 };
+
+/**
+ * The codes the bundle's `_$isCapCode` treats as "present a captcha":
+ * `441/444/445/447` (and their registration twins `108/109/110/111`).
+ *
+ * Deliberately NOT inferred from `401`: the client's `__slideErrShowDefAndRefresh`
+ * calls `_$getSlideCap` at its tail for every code that reaches it, so treating
+ * `401` as a captcha demand was wrong. (Its own error map renders `401`+`dt:"02"` as
+ * 账号格式错误.)
+ */
+const CAPTCHA_CODES = new Set(["441", "444", "445", "447", "108", "109", "110", "111"]);
 
 /**
  * Runs the whole login over HTTP. Performs no request beyond the five URS calls, and
@@ -306,7 +321,7 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
       ret,
       dt: dtOf(ini.json),
       message: `URS ini failed: HTTP ${ini.statusCode} ret=${ret} ${ini.body.slice(0, 200)}`,
-      needsCaptcha: ret === "401",
+      needsCaptcha: CAPTCHA_CODES.has(ret ?? ""),
       ...baseResult,
     };
   }
@@ -371,7 +386,7 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
       ret,
       dt: dtOf(gt.json),
       message: `URS gt failed: HTTP ${gt.statusCode} ret=${ret} ${gt.body.slice(0, 200)}`,
-      needsCaptcha: ret === "401",
+      needsCaptcha: CAPTCHA_CODES.has(ret ?? ""),
       cookie: "",
       ticket: null,
       power,
@@ -392,7 +407,7 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
   });
   const ret = retOf(submit.json);
   const dt = dtOf(submit.json);
-  const needsCaptcha = ret === "401" && dt === "02";
+  const needsCaptcha = CAPTCHA_CODES.has(ret ?? "");
   const cookie = jarHeader(jar);
   if (ret === "201") {
     return {
@@ -412,12 +427,16 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
     stage: "submit",
     ret,
     dt,
-    message: needsCaptcha
-      ? "URS asked for a slider captcha (401/dt=02) before accepting the password. " +
-        "This is the site's adaptive risk control, not a malformed request; use the " +
-        "browser login (`npm run login`) for this account."
-      : `URS login failed: HTTP ${submit.statusCode} ret=${ret} — ` +
-        `${RESPONSE_MESSAGES[ret ?? ""] ?? submit.body.slice(0, 200)}`,
+    message:
+      ret === "401" && dt === "02"
+        ? "The server rejected the account at submit (401/dt=02). Its own error map renders " +
+          "401+02 as 账号格式错误, but `gt` had already accepted the same value and issued a " +
+          "ticket, so this is not a formatting problem: icourse163 hides the 网易邮箱账号登录 " +
+          "tab, so the email channel appears not to be offered for this product at all. Use " +
+          "the phone channel (--channel phone, the default) with your real account, or use " +
+          "`npm run login` (browser)."
+        : `URS login failed: HTTP ${submit.statusCode} ret=${ret} — ` +
+          `${RESPONSE_MESSAGES[ret ?? ""] ?? submit.body.slice(0, 200)}`,
     needsCaptcha,
     cookie,
     ticket,
