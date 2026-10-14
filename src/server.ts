@@ -171,6 +171,12 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           .number()
           .optional()
           .describe("Doc/PPT page-turn interval seconds 0–10 (default 1)"),
+        skip_to_end: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default true: seek straight to the end of the media. Fast, but the platform does not credit that progress. Set false to play through at playback_rate (takes duration/rate) so the learning is actually recorded.",
+          ),
         transport: z
           .enum(["auto", "rpc", "playwright"])
           .optional()
@@ -188,6 +194,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           school_short_name: args.school_short_name,
           playback_rate: args.playback_rate,
           page_interval_sec: args.page_interval_sec,
+          skip_to_end: args.skip_to_end,
           transport: args.transport,
         },
         ports,

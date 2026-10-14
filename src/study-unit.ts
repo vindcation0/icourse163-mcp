@@ -56,6 +56,12 @@ export type StudyUnitArgs = {
   playback_rate?: number;
   /** Seconds between simulated PPT page turns (OCS readSpeed). Default 1; 0 skips delay. */
   page_interval_sec?: number;
+  /**
+   * Default true: the browser path seeks straight to the end of the media, which is
+   * fast but the platform does not credit it. Set false to play the media through at
+   * playback_rate, which takes wall-clock duration/rate but is actually recorded.
+   */
+  skip_to_end?: boolean;
   /** Default auto: try RPC, fall back to Playwright on -10006 / 并发限制 / 本地时间 blocks. */
   transport?: StudyTransport;
 };
@@ -328,6 +334,7 @@ export async function studyUnit(
 
   const transport = normalizeStudyTransport(args.transport);
   const pageIntervalSec = clampPageIntervalSec(args.page_interval_sec);
+  const skipToEnd = args.skip_to_end !== false;
 
   if (located.unit_type === "doc") {
     return studyDocUnit({
@@ -341,6 +348,7 @@ export async function studyUnit(
       ports,
       playbackRate,
       pageIntervalSec,
+      skipToEnd,
       transport,
     });
   }
@@ -371,6 +379,7 @@ export async function studyUnit(
     ports,
     playbackRate,
     pageIntervalSec,
+    skipToEnd,
     transport,
   });
 }
@@ -567,6 +576,7 @@ async function studyVideoUnit(input: {
   ports: Icourse163Ports;
   playbackRate: number;
   pageIntervalSec: number;
+  skipToEnd: boolean;
   transport: StudyTransport;
 }): Promise<StudyUnitResult> {
   const {
@@ -580,6 +590,7 @@ async function studyVideoUnit(input: {
     ports,
     playbackRate,
     pageIntervalSec,
+    skipToEnd,
     transport,
   } = input;
 
@@ -617,6 +628,7 @@ async function studyVideoUnit(input: {
       ports,
       playbackRate,
       pageIntervalSec,
+      skipToEnd,
       unitType: "video",
       priorErrors: [],
     });
@@ -697,6 +709,7 @@ async function studyVideoUnit(input: {
       ports,
       playbackRate,
       pageIntervalSec,
+      skipToEnd,
       unitType: "video",
       priorErrors: [rpcError],
     });
@@ -722,6 +735,7 @@ async function studyDocUnit(input: {
   ports: Icourse163Ports;
   playbackRate: number;
   pageIntervalSec: number;
+  skipToEnd: boolean;
   transport: StudyTransport;
 }): Promise<StudyUnitResult> {
   const {
@@ -735,6 +749,7 @@ async function studyDocUnit(input: {
     ports,
     playbackRate,
     pageIntervalSec,
+    skipToEnd,
     transport,
   } = input;
   const contentType = located.content_type ?? 3;
@@ -753,6 +768,7 @@ async function studyDocUnit(input: {
       ports,
       playbackRate,
       pageIntervalSec,
+      skipToEnd,
       unitType: "doc",
       priorErrors: [],
     });
@@ -792,6 +808,7 @@ async function studyDocUnit(input: {
         ports,
         playbackRate,
         pageIntervalSec,
+        skipToEnd,
         unitType: "doc",
         priorErrors: [{ where: "learn_vo", message: detail }],
       });
@@ -870,6 +887,7 @@ async function studyDocUnit(input: {
       ports,
       playbackRate,
       pageIntervalSec,
+      skipToEnd,
       unitType: "doc",
       priorErrors: [rpcError],
     });
@@ -897,6 +915,7 @@ async function runPlaywrightStudy(input: {
   ports: Icourse163Ports;
   playbackRate: number;
   pageIntervalSec: number;
+  skipToEnd: boolean;
   unitType: "video" | "doc";
   priorErrors: ToolError[];
 }): Promise<StudyUnitResult> {
@@ -911,6 +930,7 @@ async function runPlaywrightStudy(input: {
     ports,
     playbackRate,
     pageIntervalSec,
+    skipToEnd,
     unitType,
     priorErrors,
   } = input;
@@ -931,6 +951,7 @@ async function runPlaywrightStudy(input: {
       content_type: located.content_type,
       playback_rate: playbackRate,
       page_interval_sec: pageIntervalSec,
+      seek_near_end: !skipToEnd,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
