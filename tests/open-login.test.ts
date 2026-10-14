@@ -8,7 +8,9 @@ import {
   describeLoginFailure,
   isPasswordSubmitLabel,
   passwordLoginHeadless,
+  passwordPromptLabel,
   redactLoginSecrets,
+  showPasswordEnabled,
 } from "../src/open-login";
 import type { Cookie } from "playwright-core";
 
@@ -102,6 +104,25 @@ describe("redactLoginSecrets", () => {
     assert.doesNotMatch(redacted, /alice/);
     assert.doesNotMatch(redacted, /s3cret-value/);
     assert.match(redacted, /已隐藏/);
+  });
+});
+
+describe("showPasswordEnabled / passwordPromptLabel", () => {
+  // Hidden is the default on purpose; visible is an explicit opt-in.
+  test("is off unless the flag or the environment asks for it", () => {
+    assert.equal(showPasswordEnabled(false, {}), false);
+    assert.equal(showPasswordEnabled(false, { ICOURSE163_SHOW_PASSWORD: "0" }), false);
+    assert.equal(showPasswordEnabled(true, {}), true);
+    assert.equal(showPasswordEnabled(false, { ICOURSE163_SHOW_PASSWORD: "1" }), true);
+    assert.equal(showPasswordEnabled(true, { ICOURSE163_SHOW_PASSWORD: "0" }), true);
+  });
+
+  test("labels the two modes differently so the user can tell which is active", () => {
+    assert.match(passwordPromptLabel(false), /不显示/);
+    assert.match(passwordPromptLabel(true), /可见/);
+    assert.notEqual(passwordPromptLabel(false), passwordPromptLabel(true));
+    assert.equal(passwordPromptLabel(true, true), "Password (visible): ");
+    assert.equal(passwordPromptLabel(false, true), "Password: ");
   });
 });
 

@@ -30,6 +30,29 @@ const POLL_INTERVAL_MS = 2_000;
 
 export const PASSWORD_MODE_SWITCH_LABEL = /密码登录|账号登录|邮箱登录/;
 
+/**
+ * Whether the password prompt should echo what is typed.
+ *
+ * Hidden stays the default because visible input lands in the terminal scrollback and in
+ * anything recording the screen, but the choice belongs to the user: a password with
+ * characters that are awkward to type blind is a real usability problem. Opt in with
+ * `--show-password` or ICOURSE163_SHOW_PASSWORD=1.
+ */
+export function showPasswordEnabled(
+  flag: boolean,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return flag || env.ICOURSE163_SHOW_PASSWORD === "1";
+}
+
+/** The prompt states which mode is active, so the two are distinguishable on screen. */
+export function passwordPromptLabel(visible: boolean, english = false): string {
+  if (english) {
+    return visible ? "Password (visible): " : "Password: ";
+  }
+  return visible ? "密码（可见）: " : "密码（不显示）: ";
+}
+
 /** True for a bare password-form submit label (登录 / 登 录); false for mode-switch / mailModule headings. */
 export function isPasswordSubmitLabel(text: string): boolean {
   return text.replace(/\s+/g, "") === "登录";

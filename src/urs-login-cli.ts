@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import type { Writable } from "node:stream";
 
 import { createLocalCredentialStore } from "./credentials";
-import { redactLoginSecrets } from "./open-login";
+import { passwordPromptLabel, redactLoginSecrets, showPasswordEnabled } from "./open-login";
 import { ursLandSession, ursLogin, type UrsChannel } from "./urs-login";
 
 /**
@@ -23,6 +23,7 @@ RSA-encrypted password.
 
   -u, --username <account>   phone number or email (else ICOURSE163_USERNAME, else prompt)
       --password <password>  discouraged: visible in the process list; prefer the prompt
+      --show-password        echo the password while typing (also ICOURSE163_SHOW_PASSWORD=1)
       --channel <kind>       phone (default) or mail
 
 The password is read from a hidden prompt unless ICOURSE163_PASSWORD is set, and is
@@ -94,7 +95,28 @@ function readHiddenPassword(prompt: string): Promise<string> {
   });
 }
 
-function ttyPrompter(): Pick<UrsLoginCliIo, "promptUsername" | "promptPassword"> {
+/**
+ * Reads the password. Hidden by default (`readHiddenPassword`), echoing it only when the
+ * caller explicitly opts in via `--show-password` / ICOURSE163_SHOW_PASSWORD=1.
+ *
+ * Hidden stays the default on purpose: visible input lands in the terminal scrollback,
+ * in screen shares and in recordings. But it is a real usability problem for passwords
+ * with characters that are hard to type blind, so the choice belongs to the user.
+ */
+export function readPassword(prompt: string, visible: boolean): Promise<string> {
+  if (!visible) {
+    return readHiddenPassword(prompt);
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise<string>((resolve) => {
+    rl.question(prompt, (answer) => {
+      rl.close();
+      resolve(answer);
+    });
+  });
+}
+
+function ttyPrompter(showPassword: boolean): Pick<UrsLoginCliIo, "promptUsername" | "promptPassword"> {
   if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
     return {};
   }
@@ -109,7 +131,7 @@ function ttyPrompter(): Pick<UrsLoginCliIo, "promptUsername" | "promptPassword">
         rl.close();
       }
     },
-    promptPassword: () => readHiddenPassword("密码（不显示）: "),
+    promptPassword: () => readPassword(passwordPromptLabel(showPassword), showPassword),
   };
 }
 
@@ -117,11 +139,13 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
   username: string;
   password: string;
   channel: UrsChannel;
+  showPassword: boolean;
   help: boolean;
 } {
   let username = "";
   let password = "";
   let channel: UrsChannel = 1;
+  let showPassword = false;
   let help = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -130,6 +154,7 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
       return argv[i] ?? "";
     };
     if (arg === "-h" || arg === "--help") help = true;
+    else if (arg === "--show-password") showPassword = true;
     else if (arg === "-u" || arg === "--username") username = next();
     else if (arg.startsWith("--username=")) username = arg.slice(11);
     else if (arg === "-p" || arg === "--password") password = next();
@@ -142,7 +167,7 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
       channel = value === "mail" || value === "email" || value === "0" ? 0 : 1;
     }
   }
-  return { username, password, channel, help };
+  return { username, password, channel, showPassword, help };
 }
 
 export async function runUrsLoginCli(input: {
@@ -220,10 +245,14 @@ export async function runUrsLoginCli(input: {
 }
 
 async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const flags = parseUrsLoginArgs(argv);
+  // Opt-in from either the flag or the environment, so wrappers (mooc.py) can pass it on.
+  const showPassword = showPasswordEnabled(flags.showPassword, process.env);
   const code = await runUrsLoginCli({
-    argv: process.argv.slice(2),
+    argv,
     env: process.env,
-    io: { stdout: process.stdout, stderr: process.stderr, ...ttyPrompter() },
+    io: { stdout: process.stdout, stderr: process.stderr, ...ttyPrompter(showPassword) },
   });
   process.exitCode = code;
 }
