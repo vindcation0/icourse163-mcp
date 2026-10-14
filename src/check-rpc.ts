@@ -239,9 +239,12 @@ if (saved.kind === "saved") {
 } else {
   const where = saved.kind === "error" ? saved.where : "credentials";
   console.log(`result       : ${saved.kind} [${where}] ${saved.message}`);
-  console.log("verdict      : BLOCKED");
+  console.log("verdict      : REJECTED — but this is a signature failure, not an anti-abuse block");
   console.log("\n=== OVERALL ===");
-  console.log("RPC progress reporting is BLOCKED for this session. Use transport=auto (it");
-  console.log("detects this and falls back to the browser) or transport=playwright.");
-  console.log("transport=rpc will only ever return errors.");
+  console.log("-10006 (请检查本地时间是否和北京时间一致) and 并发限制 are the server's reply to a");
+  console.log("request whose auth-signature does not verify. They are NOT a risk-control ban:");
+  console.log("the same endpoint returns code 0 for a correctly signed request.");
+  console.log("This build sends no auth-signature / nonce / timestamp / system headers, so it is");
+  console.log("always rejected. See docs/adr/0004-rpc-request-signing.md for the algorithm.");
+  console.log("Until signing is implemented, use transport=auto so it falls back to the browser.");
 }
