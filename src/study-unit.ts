@@ -15,6 +15,7 @@ import {
 } from "./json-util";
 import { mapContentType, type UnitType } from "./list-term-units";
 import type { Icourse163Http, Icourse163Ports } from "./ports";
+import { buildSignedRpcRequest } from "./rpc-sign";
 import {
   classifyCourseKind,
   createPlaywrightStudyRunner,
@@ -23,7 +24,9 @@ import {
   type StudyPlaywrightOutcome,
 } from "./study-playwright";
 
-export const SAVE_LEARN_RPC_PATH = "/web/j/courseBean.saveMocContentLearn.rpc";
+// The live client posts to `courseRpcBean`, not `courseBean`; the latter is a stale
+// variant. The request must also carry an auth-signature — see ./rpc-sign.
+export const SAVE_LEARN_RPC_PATH = "/web/j/courseRpcBean.saveMocContentLearn.rpc";
 export const SAVE_LEARN_RPC_URL = `https://www.icourse163.org${SAVE_LEARN_RPC_PATH}`;
 
 export const LEARN_VO_RPC_PATH = "/web/j/courseBean.getLessonUnitLearnVo.rpc";
@@ -197,22 +200,42 @@ export function findUnitInMocTerm(
   return null;
 }
 
-export function buildVideoLearnDto(input: {
+/**
+ * Body for `saveMocContentLearn` on a video unit.
+ *
+ * Captured from the platform's own client: flat fields (no `videoDto` nesting),
+ * `action: "LEARN_TIME_COUNT"`, and a per-report `learnedVideoTimeCount`. The real
+ * client sends one report per ~60s of playback and progress accumulates; reporting
+ * the whole duration in a single call marks the unit complete at once, which is
+ * what this tool wants.
+ *
+ * `userId` appears in the browser payload but is NOT required — omitting it still
+ * returns code 0 (verified).
+ */
+export function buildVideoLearnReport(input: {
+  course_id: string;
+  term_id: string;
+  lesson_id: string;
   unit_id: string;
-  content_id: string;
+  video_id: string;
   duration_sec: number;
-}): VideoLearnDto {
+  learned_sec?: number;
+}): Record<string, unknown> {
   const duration = Math.max(0, Math.floor(input.duration_sec));
+  const learned = Math.max(0, Math.min(duration, Math.floor(input.learned_sec ?? duration)));
   return {
     unitId: Number(input.unit_id),
-    contentType: 1,
     finished: true,
-    videoDto: {
-      videoId: Number(input.content_id),
-      duration,
-      currentTime: duration,
-      learnedTime: duration,
-    },
+    index: 1,
+    duration: learned * 1000,
+    courseId: Number(input.course_id),
+    lessonId: Number(input.lesson_id),
+    videoId: Number(input.video_id),
+    termId: Number(input.term_id),
+    contentType: 1,
+    action: "LEARN_TIME_COUNT",
+    videoTime: duration,
+    learnedVideoTimeCount: learned,
   };
 }
 
@@ -510,17 +533,21 @@ export async function saveLearnDto(input: {
   referer: string;
   dto: unknown;
 }): Promise<SaveLearnOutcome> {
+  // Signed JSON body. The signature covers these exact bytes, so send them raw.
+  const signed = buildSignedRpcRequest({
+    dto: input.dto,
+    csrfKey: input.csrfKey,
+    origin: ORIGIN,
+    referer: input.referer,
+  });
   let saveBody: string;
   try {
     const response = await input.http.request({
       url: `${SAVE_LEARN_RPC_URL}?csrfKey=${encodeURIComponent(input.csrfKey)}`,
       cookie: input.cookie,
       method: "POST",
-      form: { dto: JSON.stringify(input.dto) },
-      headers: {
-        origin: ORIGIN,
-        referer: input.referer,
-      },
+      raw: signed.body,
+      headers: signed.headers,
     });
     if (response.statusCode === 401 || response.statusCode === 403) {
       return {
@@ -650,9 +677,28 @@ async function studyVideoUnit(input: {
     };
   }
 
-  const dto = buildVideoLearnDto({
+  if (located.lesson_id == null) {
+    return {
+      ...base,
+      isError: true,
+      status: "page_structure_change",
+      unit_type: "video",
+      errors: [
+        {
+          where: "term",
+          message:
+            "Unit has no lesson id in the term catalog, so the signed learn report cannot be built",
+        },
+      ],
+    };
+  }
+
+  const dto = buildVideoLearnReport({
+    course_id: courseId,
+    term_id: termId,
+    lesson_id: located.lesson_id,
     unit_id: unitId,
-    content_id: contentId,
+    video_id: contentId,
     duration_sec: durationSec,
   });
 

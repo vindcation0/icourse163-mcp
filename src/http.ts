@@ -136,7 +136,20 @@ function buildFetchInit(
   const sendBody =
     originalUrl != null &&
     method === "POST" &&
-    (input.json !== undefined || input.form !== undefined);
+    (input.json !== undefined || input.form !== undefined || input.raw !== undefined);
+
+  if (sendBody && input.raw !== undefined) {
+    if (input.json !== undefined || input.form !== undefined) {
+      throw new Error("http_request_cannot_mix_raw_with_json_or_form");
+    }
+    // Sent verbatim: signed RPCs cover these exact bytes in the signature.
+    return {
+      method: "POST",
+      headers,
+      body: input.raw,
+      redirect: "manual",
+    };
+  }
 
   if (sendBody && input.json !== undefined) {
     if (input.form !== undefined) {

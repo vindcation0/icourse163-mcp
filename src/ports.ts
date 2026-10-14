@@ -12,6 +12,12 @@ export type Icourse163HttpRequest = {
   form?: Record<string, string>;
   /** application/json body (mutually exclusive with form). */
   json?: unknown;
+  /**
+   * Body sent verbatim. Required for signed RPCs: the signature covers the exact
+   * bytes on the wire, so the transport must not re-serialize it. Pair with an
+   * explicit content-type header.
+   */
+  raw?: string;
   headers?: Record<string, string>;
 };
 

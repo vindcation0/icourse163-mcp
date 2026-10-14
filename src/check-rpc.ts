@@ -28,7 +28,7 @@ import { fetchMocTermDto, learnReferer, resolveSession } from "./course-rpc";
 import {
   LEARN_VO_RPC_URL,
   buildDocLearnDto,
-  buildVideoLearnDto,
+  buildVideoLearnReport,
   fetchLessonUnitLearnVo,
   saveLearnDto,
 } from "./study-unit";
@@ -45,6 +45,7 @@ function flag(name: string): FlagValue {
 
 type Candidate = {
   unitId: string;
+  lessonId: string | null;
   name: string;
   contentType: number | null;
   contentId: string | null;
@@ -67,6 +68,7 @@ function collectUnits(moc: Record<string, unknown>): Candidate[] {
         if (unitId == null) continue;
         out.push({
           unitId,
+          lessonId: asId(lesson.id),
           name: asNonEmptyString(unit.name) ?? "未命名",
           contentType: asFiniteNumber(unit.contentType),
           contentId: asId(unit.contentId) ?? asId(unit.videoId) ?? asId(unit.resourceId),
@@ -210,14 +212,17 @@ if (contentType === 3 || contentType === 4) {
   }
   dto = buildDocLearnDto({ unit_id: target.unitId, content_type: contentType, page_count: pageCount });
 } else {
-  if (target.durationSec == null || target.contentId == null) {
-    console.log("dto          : skipped — catalog lacks duration/contentId for this unit");
+  if (target.durationSec == null || target.contentId == null || target.lessonId == null) {
+    console.log("dto          : skipped — catalog lacks duration/contentId/lessonId for this unit");
     console.log("verdict      : INCONCLUSIVE");
     process.exit(0);
   }
-  dto = buildVideoLearnDto({
+  dto = buildVideoLearnReport({
+    course_id: courseId,
+    term_id: termId,
+    lesson_id: target.lessonId,
     unit_id: target.unitId,
-    content_id: target.contentId,
+    video_id: target.contentId,
     duration_sec: target.durationSec,
   });
 }

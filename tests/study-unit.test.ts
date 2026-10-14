@@ -7,7 +7,7 @@ import {
   LEARN_VO_RPC_URL,
   SAVE_LEARN_RPC_URL,
   buildDocLearnDto,
-  buildVideoLearnDto,
+  buildVideoLearnReport,
   clampPageIntervalSec,
   findUnitInMocTerm,
   isLearnProgressBlockedMessage,
@@ -19,8 +19,30 @@ import type {
   Icourse163Ports,
 } from "../src/ports";
 import { CATALOG_MOC_TERM_DTO, mocTermBody } from "./fixtures";
+import { icourse163RpcSignature } from "../src/rpc-sign";
 
 const SESSION = "NTESSTUDYSI=test-session";
+
+/**
+ * Asserts the saveMocContentLearn call is a signed JSON request and returns its dto.
+ * The signature must verify against the exact bytes sent, so recompute it here: a
+ * body that does not match the signature is rejected by the server with a bogus
+ * "并发限制" message, which is exactly the failure this replaced.
+ */
+function parseSignedSave(call: Icourse163HttpRequest | undefined): Record<string, unknown> {
+  assert.ok(call != null, "expected a saveMocContentLearn call");
+  assert.equal(call.method, "POST");
+  assert.equal(call.form, undefined, "the signed save must not be form-encoded");
+  assert.ok(call.raw != null, "the signed save must send a raw body");
+  assert.equal(call.headers?.["content-type"], "application/json;charset=UTF-8");
+  assert.equal(call.headers?.["system"], "v1");
+  assert.equal(call.headers?.["edu-script-token"], "test-session");
+  const nonce = Number(call.headers?.nonce);
+  const timestamp = Number(call.headers?.timestamp);
+  assert.ok(Number.isFinite(nonce) && Number.isFinite(timestamp));
+  assert.equal(call.headers?.["auth-signature"], icourse163RpcSignature(call.raw, nonce, timestamp));
+  return (JSON.parse(call.raw) as { dto: Record<string, unknown> }).dto;
+}
 
 function portsWith(
   getCookie: () => Promise<string | null>,
@@ -148,20 +170,60 @@ describe("findUnitInMocTerm", () => {
   });
 });
 
-describe("buildVideoLearnDto", () => {
-  test("builds finished video dto for saveMocContentLearn", () => {
-    const dto = buildVideoLearnDto({
-      unit_id: "401",
-      content_id: "9001",
-      duration_sec: 120,
+// Shape captured from the platform's own client. The old nested videoDto form was
+// rejected with -10006/-2 because it was not the real contract (nor signed).
+describe("buildVideoLearnReport", () => {
+  test("builds the flat LEARN_TIME_COUNT report", () => {
+    const dto = buildVideoLearnReport({
+      course_id: "1450750234",
+      term_id: "1475848441",
+      lesson_id: "1265444035",
+      unit_id: "1305575052",
+      video_id: "1216009818",
+      duration_sec: 1125,
     });
-    assert.equal(dto.unitId, 401);
+    assert.equal(dto.unitId, 1305575052);
     assert.equal(dto.contentType, 1);
     assert.equal(dto.finished, true);
-    assert.equal(dto.videoDto.videoId, 9001);
-    assert.equal(dto.videoDto.duration, 120);
-    assert.equal(dto.videoDto.currentTime, 120);
-    assert.equal(dto.videoDto.learnedTime, 120);
+    assert.equal(dto.action, "LEARN_TIME_COUNT");
+    assert.equal(dto.courseId, 1450750234);
+    assert.equal(dto.lessonId, 1265444035);
+    assert.equal(dto.videoId, 1216009818);
+    assert.equal(dto.termId, 1475848441);
+    assert.equal(dto.index, 1);
+    assert.equal(dto.videoTime, 1125);
+    assert.equal(dto.learnedVideoTimeCount, 1125);
+    assert.equal(dto.duration, 1125000);
+    // the rejected shape had this; the real one must not
+    assert.equal("videoDto" in dto, false);
+  });
+
+  test("learned_sec is clamped to the video length", () => {
+    const dto = buildVideoLearnReport({
+      course_id: "1",
+      term_id: "2",
+      lesson_id: "3",
+      unit_id: "4",
+      video_id: "5",
+      duration_sec: 100,
+      learned_sec: 500,
+    });
+    assert.equal(dto.learnedVideoTimeCount, 100);
+    assert.equal(dto.duration, 100000);
+  });
+
+  test("honours a partial learned_sec", () => {
+    const dto = buildVideoLearnReport({
+      course_id: "1",
+      term_id: "2",
+      lesson_id: "3",
+      unit_id: "4",
+      video_id: "5",
+      duration_sec: 100,
+      learned_sec: 60,
+    });
+    assert.equal(dto.learnedVideoTimeCount, 60);
+    assert.equal(dto.duration, 60000);
   });
 });
 
@@ -296,15 +358,7 @@ describe("studyUnit", () => {
     assert.equal(JSON.stringify(result).includes("test-session"), false);
 
     const saveCall = calls.find((call) => call.url.startsWith(SAVE_LEARN_RPC_URL));
-    assert.ok(saveCall != null);
-    assert.equal(saveCall.method, "POST");
-    assert.ok(saveCall.form?.dto != null);
-    const dto = JSON.parse(saveCall.form.dto) as {
-      unitId: number;
-      contentType: number;
-      finished: boolean;
-      pageNum: number;
-    };
+    const dto = parseSignedSave(saveCall);
     assert.equal(dto.unitId, 402);
     assert.equal(dto.contentType, 3);
     assert.equal(dto.finished, true);
@@ -349,8 +403,7 @@ describe("studyUnit", () => {
     assert.equal(result.completed, true);
     assert.equal(result.page_count, 1);
     const saveCall = calls.find((call) => call.url.startsWith(SAVE_LEARN_RPC_URL));
-    assert.ok(saveCall != null);
-    const dto = JSON.parse(saveCall.form!.dto!) as { contentType: number; pageNum: number };
+    const dto = parseSignedSave(saveCall);
     assert.equal(dto.contentType, 4);
     assert.equal(dto.pageNum, 1);
   });
@@ -427,19 +480,15 @@ describe("studyUnit", () => {
     assert.equal(JSON.stringify(result).includes("test-session"), false);
 
     const saveCall = calls.find((call) => call.url.startsWith(SAVE_LEARN_RPC_URL));
-    assert.ok(saveCall != null);
-    assert.equal(saveCall.method, "POST");
-    assert.ok(saveCall.form?.dto != null);
-    const dto = JSON.parse(saveCall.form.dto) as {
-      unitId: number;
-      finished: boolean;
-      videoDto: { duration: number };
-    };
+    const dto = parseSignedSave(saveCall);
     assert.equal(dto.unitId, 401);
     assert.equal(dto.finished, true);
-    assert.equal(dto.videoDto.duration, 120);
+    assert.equal(dto.action, "LEARN_TIME_COUNT");
+    assert.equal(dto.videoTime, 120);
+    assert.equal(dto.learnedVideoTimeCount, 120);
+    assert.equal("videoDto" in dto, false);
     assert.equal(
-      saveCall.headers?.referer,
+      saveCall?.headers?.referer,
       learnReferer({
         course_id: "1001",
         term_id: "2001",
@@ -490,12 +539,10 @@ describe("studyUnit", () => {
     assert.equal(result.transport, "rpc");
 
     const saveCall = calls.find((call) => call.url.startsWith(SAVE_LEARN_RPC_URL));
-    assert.ok(saveCall != null);
-    const dto = JSON.parse(saveCall.form!.dto!) as {
-      videoDto: { videoId: number; duration: number };
-    };
-    assert.equal(dto.videoDto.videoId, 1231832139);
-    assert.equal(dto.videoDto.duration, 8369);
+    const dto = parseSignedSave(saveCall);
+    assert.equal(dto.videoId, 1231832139);
+    assert.equal(dto.videoTime, 8369);
+    assert.equal(dto.learnedVideoTimeCount, 8369);
   });
 
   test("malformed save response is page_structure_change", async () => {
