@@ -52,6 +52,13 @@ export type StudyPlaywrightArgs = {
   playback_rate: number;
   page_interval_sec: number;
   /**
+   * Full media length from the term catalog. The player loads long media in
+   * segments and swaps the <video> source, so element.duration can be a segment
+   * length rather than the whole video; treating that as the target ends a run
+   * early and reports success for partial playback.
+   */
+  duration_sec?: number | null;
+  /**
    * When true (default), seek near the end of long media so automation can finish.
    * Set false to play through at playback_rate (may take wall-clock duration/rate).
    */
@@ -261,6 +268,7 @@ export async function studyUnitWithPlaywright(
         args.playback_rate,
         seekNearEnd,
         timeoutMs,
+        args.duration_sec ?? null,
       );
       return attachNavStrategy(outcome, nav.strategy);
     }
@@ -608,6 +616,7 @@ async function watchMediaInPage(
   playbackRate: number,
   seekNearEnd: boolean,
   timeoutMs: number,
+  targetDurationSec: number | null,
 ): Promise<StudyPlaywrightOutcome> {
   try {
     await page.waitForSelector(MEDIA_SELECTOR, {
@@ -632,6 +641,11 @@ async function watchMediaInPage(
 
   if (seekNearEnd) {
     await seekMediaNearEnd(page);
+  } else {
+    // For partially-watched media icourse163's own player resumes near the end
+    // (observed: it opened unit 1305575066 at 720s of 728s), so a "real playback"
+    // run finishes in seconds and the platform records nothing new. Pin it at 0.
+    await rewindMediaToStart(page);
   }
 
   const deadline = Date.now() + timeoutMs;
@@ -649,11 +663,19 @@ async function watchMediaInPage(
     }
 
     const progress = await readMediaProgress(page);
+    // Prefer the catalog length only for real playback: element.duration can be a
+    // segment length there, and finishing on a segment boundary reports success
+    // after partial playback. In seek mode the element is deliberately parked at
+    // duration-1.5, so the element's own duration stays the right yardstick.
+    const target =
+      !seekNearEnd && targetDurationSec != null && targetDurationSec > 0
+        ? targetDurationSec
+        : progress.duration;
     const nearEnd =
-      progress.duration != null &&
+      target != null &&
       progress.current != null &&
-      progress.duration > 0 &&
-      progress.current >= Math.max(0, progress.duration - 2);
+      target > 0 &&
+      progress.current >= target - 2;
     if (progress.ended || nearEnd) {
       const duration = progress.duration ?? progress.current;
       return {
@@ -827,6 +849,28 @@ async function isQuizVisible(page: Page): Promise<boolean> {
   }
 }
 
+
+/**
+ * Pin the media at the start and start playing. icourse163's player resumes
+ * partially-watched media near its end, so without this a "real playback" run
+ * finishes within seconds and the platform records no new progress.
+ */
+async function rewindMediaToStart(page: Page): Promise<void> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    await page
+      .evaluate(
+        new Function(
+          "var el = document.querySelector('video, audio');" +
+            "if (!el) return;" +
+            "el.muted = true;" +
+            "if (!(el.currentTime < 1)) { el.currentTime = 0; }" +
+            "try { el.play(); } catch (e) {}",
+        ) as () => void,
+      )
+      .catch(() => undefined);
+    await sleepMs(700);
+  }
+}
 
 async function seekMediaNearEnd(page: Page): Promise<void> {
   await page.evaluate(
