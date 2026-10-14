@@ -10,7 +10,18 @@ import { listCourses } from "./list-courses";
 import { listTermUnits } from "./list-term-units";
 import { listTodos } from "./list-todos";
 import type { Icourse163Ports } from "./ports";
+import { sessionStatus } from "./session-status";
 import { studyUnit } from "./study-unit";
+
+const SESSION_STATUS_DESCRIPTION = [
+  "Report whether the stored 中国大学MOOC session can be used, and by which transport.",
+  "Returns: stored (a session exists locally), cookies (ntesstudysi / study_info / study_sess present), api (an authenticated read succeeded), course_count, browser_path_ready, and a guidance string.",
+  "Read-only: it never writes progress and never requests /learn/ (which can trigger a logout and invalidate a working session).",
+  "Use it before a batch when tools are failing, to tell an expired or API-only session apart from a code problem.",
+  "Key distinction: NTESSTUDYSI alone means API calls and the signed RPC path work, but the Playwright path needs STUDY_SESS/STUDY_INFO too, since a plain /learn/ request without a live web session is bounced. cookieHasStudyInfo is not enough — that pairing is what makes list_courses succeed while study_unit reports a missing video element.",
+  "status ok means usable; auth_expired means run `npm run login`; the signed-write path itself is covered by `npm run check:rpc`.",
+  "Do not pass accounts or cookies; this tool never returns them.",
+].join(" ");
 
 const LIST_TODOS_DESCRIPTION = [
   "List still-open 待办 from 中国大学MOOC (icourse163.org): 未完成 / 未交 / 可作答 homework, quizzes, and exams.",
@@ -95,6 +106,22 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
     },
     async () => {
       const result = await listTodos(ports);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "session_status",
+    {
+      title: "Session status",
+      description: SESSION_STATUS_DESCRIPTION,
+    },
+    async () => {
+      const result = await sessionStatus(ports);
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: { ...result },

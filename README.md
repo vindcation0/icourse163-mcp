@@ -6,7 +6,7 @@
 
 - 本地进程，stdio；不托管远端会话
 - 登录只走 CLI / 环境变量；MCP 工具不收密码
-- 工具：`list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`
+- 工具：`list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`、`session_status`
 
 产品目标尽量对齐 [OCS 中国大学MOOC 脚本](https://github.com/ocsjs/ocsjs/blob/4.0/packages/scripts/src/projects/icourse.ts) 的学习自动化；**明确不做考试代交**。
 

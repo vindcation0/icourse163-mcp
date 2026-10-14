@@ -27,7 +27,7 @@ describe("icourse163 MCP server", () => {
 
       const listed = await client.listTools();
       const names = listed.tools.map((tool) => tool.name).sort();
-      assert.deepEqual(names, ["get_homework", "list_courses", "list_term_units", "list_todos", "save_homework_answers", "study_unit", "submit_homework"]);
+      assert.deepEqual(names, ["get_homework", "list_courses", "list_term_units", "list_todos", "save_homework_answers", "session_status", "study_unit", "submit_homework"]);
 
       const result = await client.callTool({ name: "list_todos", arguments: {} });
       assert.equal("isError" in result && result.isError, true);

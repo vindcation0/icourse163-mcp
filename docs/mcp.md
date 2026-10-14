@@ -2,7 +2,7 @@
 
 本仓库根目录就是给 Grok Bot / Cursor 用的本机 stdio MCP。体验对齐 [K4F7/chaoxing-mcp](https://github.com/K4F7/chaoxing-mcp) / [K4F7/pu-mcp](https://github.com/K4F7/pu-mcp)：一个进程、stdio、凭据不进工具参数。
 
-工具含 `list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`。登录只走 CLI，见 [docs/login.md](login.md)。MCP 从不接收或返回 cookie / 密码。
+工具含 `list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`、`session_status`。登录只走 CLI，见 [docs/login.md](login.md)。MCP 从不接收或返回 cookie / 密码。
 
 产品目标对齐 OCS 学习自动化（自动看课、测验/作业辅助；**考试代交不做**），详见仓库根 [README](../README.md)。答卷流水线：`read` → AI 填答 → **`save` 必调（草稿）** → 用户确认后才显式 `submit`（默认不交）。实现可用 RPC 或 DOM/Playwright（或混合），由后续 issue 细化。
 
@@ -121,6 +121,17 @@ startup_timeout_sec = 60
 ```
 
 Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--prefix /ABS/PATH/TO/icourse163-mcp`。
+
+## `session_status`
+
+- 报告本机会话能否使用、以及哪些 transport 可用。**只读**：不写进度，也不请求 `/learn/`（那可能触发登出，反而弄坏一个正常的会话）。
+- 返回：`stored`（本地有会话）、`cookies`（`ntesstudysi` / `study_info` / `study_sess` 是否存在，以及 cookie 总数）、`api`（一次鉴权读取的结果）、`course_count`、`browser_path_ready`、`guidance`。
+- 关键区分（这是本项目最容易误判的状态）：
+  - 只有 `NTESSTUDYSI` → **API 调用与签名 RPC 路径可用**，但 Playwright 路径不可用。因为网页会话缺失时，普通 HTML 请求会被弹离 `/learn/`，于是 `list_courses` 一切正常而 `study_unit` 报「找不到视频元素」。
+  - `STUDY_INFO` + `STUDY_SESS` 齐全 → 两条路径都可用。
+- `status: ok` = 可用；`auth_expired` = 需要 `npm run login`。
+- 签名写入路径（`saveMocContentLearn`）本身不在这里验证 —— 它需要一次写入，见 `npm run check:rpc`。
+- 不要传账号或 cookie；工具也不返回它们。
 
 ## `list_todos`
 
