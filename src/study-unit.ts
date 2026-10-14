@@ -908,6 +908,7 @@ async function runPlaywrightStudy(input: {
       term_id: course.term_id,
       school_short_name: course.school_short_name,
       unit_id: unitId,
+      lesson_id: located.lesson_id,
       unit_name: located.name,
       content_id: located.content_id,
       unit_type: unitType,

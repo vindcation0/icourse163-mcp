@@ -38,6 +38,8 @@ export type StudyPlaywrightArgs = {
   term_id: string;
   school_short_name: string;
   unit_id: string;
+  /** 课时 (lesson) id from the term catalog; drives the content-hash deeplink. */
+  lesson_id?: string | null;
   /** Optional display name to click in the 课件 tree when deep-link fails. */
   unit_name?: string | null;
   content_id: string | null;
@@ -97,6 +99,8 @@ export function buildLearnUnitUrl(input: {
   term_id: string;
   school_short_name: string;
   unit_id: string;
+  /** 课时 (lesson) id — the `id` segment of the content hash. Defaults to unit_id. */
+  lesson_id?: string | null;
   /** Optional display name to click in the 课件 tree when deep-link fails. */
   unit_name?: string | null;
   content_id: string | null;
@@ -106,9 +110,7 @@ export function buildLearnUnitUrl(input: {
     term_id: input.term_id,
     school_short_name: input.school_short_name,
   });
-  const cid = (input.content_id ?? input.unit_id).trim();
-  const id = input.unit_id.trim();
-  return `${base}#/learn/content?type=detail&id=${encodeURIComponent(id)}&cid=${encodeURIComponent(cid)}`;
+  return `${base}${buildLearnContentHash(input.lesson_id ?? input.unit_id, input.unit_id)}`;
 }
 
 export function cookieHeaderToPlaywrightCookies(header: string): Cookie[] {
@@ -157,12 +159,16 @@ export function classifyCourseKind(schoolShortName: string): CourseKind {
     : "school";
 }
 
-export function buildLearnContentHash(
-  unitId: string,
-  contentId: string | null,
-): string {
-  const id = unitId.trim();
-  const cid = (contentId ?? unitId).trim();
+/**
+ * Learn-content hash fragment. `id` is the 课时 (lesson) id and `cid` is the
+ * 课件 (unit) id — verified against the live site, where clicking a tree unit
+ * produces e.g. `#/learn/content?type=detail&id=1265444045&cid=1305575068`.
+ * Passing the unit id as `id` (or the video content id as `cid`) yields a hash
+ * the SPA cannot resolve, so the player never mounts.
+ */
+export function buildLearnContentHash(lessonId: string, unitId: string): string {
+  const id = lessonId.trim();
+  const cid = unitId.trim();
   return `#/learn/content?type=detail&id=${encodeURIComponent(id)}&cid=${encodeURIComponent(cid)}`;
 }
 
@@ -232,8 +238,8 @@ export async function studyUnitWithPlaywright(
     const nav = await navigateToUnitPlayer(page, {
       learnBase,
       unitId: args.unit_id,
+      lessonId: args.lesson_id ?? null,
       unitName: args.unit_name ?? null,
-      contentId: args.content_id,
     });
 
     if (args.unit_type === "doc") {
@@ -266,7 +272,17 @@ export async function studyUnitWithPlaywright(
 }
 
 async function dismissLearnDialogs(page: Page): Promise<void> {
-  for (const name of ["确定", "关闭", "我知道了", "知道了", "开始学习", "同意", "暂不"]) {
+  await dismissEvaluationModal(page);
+  for (const name of [
+    "暂不评价",
+    "确定",
+    "关闭",
+    "我知道了",
+    "知道了",
+    "开始学习",
+    "同意",
+    "暂不",
+  ]) {
     try {
       const button = page.getByRole("button", { name }).first();
       if (await button.isVisible().catch(() => false)) {
@@ -296,13 +312,38 @@ async function dismissLearnDialogs(page: Page): Promise<void> {
   }
 }
 
+/**
+ * The course-evaluation popup (`.component-eva-modal`) is a full-viewport
+ * overlay (z-index 999) that swallows every click, so no 课件 tree unit can be
+ * clicked until it is gone. It is not an Ant Design modal, so the
+ * `.ant-modal-wrap` handling above never sees it.
+ */
+async function dismissEvaluationModal(page: Page): Promise<void> {
+  const modal = page.locator(".component-eva-modal").first();
+  if (!(await modal.isVisible().catch(() => false))) {
+    return;
+  }
+  for (const target of [
+    page.getByText("暂不评价", { exact: false }).first(),
+    page.locator(".component-eva-modal_close").first(),
+  ]) {
+    await target.click({ timeout: 2000 }).catch(() => undefined);
+    if (!(await modal.isVisible().catch(() => false))) {
+      return;
+    }
+  }
+  await page.keyboard.press("Escape").catch(() => undefined);
+  await modal.waitFor({ state: "hidden", timeout: 3000 }).catch(() => undefined);
+}
+
 async function navigateToUnitPlayer(
   page: Page,
   input: {
     learnBase: string;
     unitId: string;
+    /** 课时 id — the `id` segment of the content hash. */
+    lessonId: string | null;
     unitName: string | null;
-    contentId: string | null;
   },
 ): Promise<{ strategy: NavStrategy }> {
   // commit is enough for first byte; SPA shell needs an explicit UI wait (domcontentloaded
@@ -338,7 +379,7 @@ async function navigateToUnitPlayer(
 
   // Soft in-SPA hash only after tree path failed — never cold page.goto deep-link.
   if (!clicked || missing || !(await mediaOrPdfAttached(page))) {
-    await softHashDeeplink(page, input.unitId, input.contentId);
+    await softHashDeeplink(page, input.lessonId ?? input.unitId, input.unitId);
     await dismissLearnDialogs(page);
     if (await waitForMediaOrPdf(page, 20_000)) {
       return { strategy: "deeplink_fallback" };
@@ -362,6 +403,11 @@ function attachNavStrategy(
 
 async function openCoursewareTab(page: Page): Promise<void> {
   for (const locator of [
+    // Current UI: the tab strip is an Ant Design menu whose items are
+    // `<li class="ant-menu-item"><a>课件</a></li>`. The inner <a> has no href,
+    // so it exposes no link role and getByRole("link"|"tab") finds nothing.
+    page.locator('li.ant-menu-item:has-text("课件")').first(),
+    page.locator('[role="menuitem"]:has-text("课件")').first(),
     page.getByRole("link", { name: "课件" }).first(),
     page.getByRole("tab", { name: "课件" }).first(),
     page.getByText("课件", { exact: true }).first(),
@@ -452,10 +498,10 @@ async function clickUnitInTree(
 
 async function softHashDeeplink(
   page: Page,
+  lessonId: string,
   unitId: string,
-  contentId: string | null,
 ): Promise<void> {
-  const hash = buildLearnContentHash(unitId, contentId);
+  const hash = buildLearnContentHash(lessonId, unitId);
   await page.evaluate(
     new Function("nextHash", "globalThis.location.hash = nextHash") as (
       nextHash: string,

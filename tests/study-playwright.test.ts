@@ -11,21 +11,37 @@ import {
 } from "../src/study-playwright";
 
 describe("buildLearnUnitUrl", () => {
-  test("builds learn hash URL with unit and content ids", () => {
+  // The content hash takes the 课时 (lesson) id as `id` and the 课件 (unit) id as
+  // `cid`. The previous ordering (unit id as `id`, video content id as `cid`)
+  // produced a hash the SPA silently fails to resolve, so no player ever mounted.
+  test("builds learn hash URL with lesson id as id and unit id as cid", () => {
     const url = buildLearnUnitUrl({
       course_id: "1473617163",
       term_id: "2001",
       school_short_name: "kaopei",
-      unit_id: "1303386815",
+      unit_id: "1305575068",
+      lesson_id: "1265444045",
       content_id: "1231832139",
     });
     assert.equal(
       url,
-      "https://www.icourse163.org/learn/kaopei-1473617163?tid=2001#/learn/content?type=detail&id=1303386815&cid=1231832139",
+      "https://www.icourse163.org/learn/kaopei-1473617163?tid=2001#/learn/content?type=detail&id=1265444045&cid=1305575068",
     );
   });
 
-  test("falls back cid to unit_id when content_id missing", () => {
+  test("never uses content_id as cid", () => {
+    const url = buildLearnUnitUrl({
+      course_id: "1001",
+      term_id: "2001",
+      school_short_name: "",
+      unit_id: "401",
+      lesson_id: "301",
+      content_id: "999",
+    });
+    assert.ok(url.endsWith("#/learn/content?type=detail&id=301&cid=401"), url);
+  });
+
+  test("falls back to unit_id for both segments when content_id is missing", () => {
     const url = buildLearnUnitUrl({
       course_id: "1001",
       term_id: "2001",
@@ -68,10 +84,35 @@ describe("buildLearnContentHash", () => {
       term_id: "1475287452",
       school_short_name: "kaopei",
       unit_id: "1303386815",
+      lesson_id: "1265444045",
       content_id: "1231832139",
     });
-    const hash = buildLearnContentHash("1303386815", "1231832139");
+    const hash = buildLearnContentHash("1265444045", "1303386815");
     assert.ok(url.endsWith(hash), `url=${url} hash=${hash}`);
+  });
+
+  // Verified against the live site: clicking a tree unit lands on
+  // #/learn/content?type=detail&id=<lessonId>&cid=<unitId>. Using the unit id as
+  // `id` (or the video content id as `cid`) produces a hash the SPA cannot
+  // resolve, and no player ever mounts.
+  test("uses lesson id as id and unit id as cid", () => {
+    assert.equal(
+      buildLearnContentHash("1265444045", "1305575068"),
+      "#/learn/content?type=detail&id=1265444045&cid=1305575068",
+    );
+    const swapped = buildLearnContentHash("1305575068", "1265444045");
+    assert.notEqual(swapped, "#/learn/content?type=detail&id=1265444045&cid=1305575068");
+  });
+
+  test("falls back to unit id when no lesson id is known", () => {
+    const url = buildLearnUnitUrl({
+      course_id: "1473617163",
+      term_id: "1475287452",
+      school_short_name: "kaopei",
+      unit_id: "1303386815",
+      content_id: "1231832139",
+    });
+    assert.ok(url.endsWith(buildLearnContentHash("1303386815", "1303386815")));
   });
 });
 
