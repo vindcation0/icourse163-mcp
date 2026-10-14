@@ -97,13 +97,13 @@ function readHiddenPassword(prompt: string): Promise<string> {
 }
 
 /**
- * Reads the password. Visible by default (`showPasswordEnabled`), echoing only when the
- * caller opts in via `--show-password` / ICOURSE163_SHOW_PASSWORD=1.
+ * Reads the password. Visible by default; pass `visible: false` when the caller opted out
+ * via `--hide-password` / ICOURSE163_HIDE_PASSWORD=1.
  *
- * Visible stays the default on purpose here: hidden input is a real usability problem for
- * passwords with characters that are hard to type blind, and this is a local tool. Hidden
- * remains available via `--hide-password` / ICOURSE163_HIDE_PASSWORD=1, because visible
- * input does stay in the scrollback and in screen recordings.
+ * Visible is the default at the user's request: hidden input is hard to get right for
+ * passwords with characters that are awkward to type blind, and this is a local tool on
+ * their own machine. Hiding remains available because echoed input does stay in the
+ * scrollback and in screen recordings.
  */
 export function readPassword(prompt: string, visible: boolean): Promise<string> {
   if (!visible) {
