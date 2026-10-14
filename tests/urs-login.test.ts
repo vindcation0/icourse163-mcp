@@ -13,6 +13,7 @@ import {
   URS_PRODUCT,
   URS_SM4_KEY,
   ursEncryptPassword,
+  ursLandSession,
   ursLogin,
   ursPowSign,
   ursSm4Encrypt,
@@ -207,6 +208,67 @@ const PUZZLE = {
   args: { x: "3", mod: "100", t: 2 },
 };
 
+describe("ursLandSession", () => {
+  test("merges the icourse163 session cookies and drops the useless URS ones", async () => {
+    const seen: string[] = [];
+    const http: UrsHttp = {
+      async post() {
+        throw new Error("not used");
+      },
+      async get(url, headers) {
+        seen.push(`${url} cookie=${headers.cookie}`);
+        // mirrors what /passport/logingate/changeCookie.htm and /member/login.htm set
+        return {
+          statusCode: 200,
+          body: "",
+          finalUrl: "https://www.icourse163.org/passport/logingate/changeCookie.htm",
+          setCookie: [
+            'STUDY_INFO="yd.x@163.com|8|1|2"; path=/',
+            'STUDY_SESS="abc"; path=/',
+            `STUDY_PERSIST="def"; path=/`,
+            ...(url.includes("member/login.htm") ? ["NTESSTUDYSI=token-1; path=/"] : []),
+          ],
+        };
+      },
+    };
+
+    const result = await ursLandSession({
+      cookie: "NTES_YD_PASSPORT=urs-passport; NTES_YD_SESS=urs-sess; URS_ONLY=noise; S_INFO=x",
+      http,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.hasApiToken, true);
+    assert.equal(result.hasWebSession, true);
+    assert.equal(seen.length, 2, "both landing URLs must be requested");
+    assert.match(seen[0] ?? "", /NTES_YD_PASSPORT=urs-passport/);
+    assert.match(seen[1] ?? "", /STUDY_INFO=/);
+    // the URS-only cookies are dropped: keeping them pushed the stored value past the
+    // Windows keychain's 2560-byte limit, so the write fell back to a file and the
+    // keychain kept serving a stale cookie.
+    assert.doesNotMatch(result.cookie, /URS_ONLY/);
+    assert.doesNotMatch(result.cookie, /NTES_YD_SESS/);
+    assert.match(result.cookie, /NTESSTUDYSI=token-1/);
+    assert.match(result.cookie, /STUDY_SESS="abc"/);
+    assert.match(result.cookie, /NTES_YD_PASSPORT=urs-passport/);
+  });
+
+  test("reports failure when the landing yields no API token", async () => {
+    const http: UrsHttp = {
+      async post() {
+        throw new Error("not used");
+      },
+      async get() {
+        return { statusCode: 200, body: "", finalUrl: "", setCookie: [] };
+      },
+    };
+    const result = await ursLandSession({ cookie: "NTES_YD_PASSPORT=x", http });
+    assert.equal(result.ok, false);
+    assert.equal(result.hasApiToken, false);
+    assert.match(result.message, /NTESSTUDYSI/);
+  });
+});
+
 describe("ursLogin", () => {
   test("walks ini -> powGetP -> gt -> submit and returns the session cookie", async () => {
     const { http, calls } = fakeUrs((path) => {
@@ -246,11 +308,28 @@ describe("ursLogin", () => {
     assert.equal(submit.pd, URS_PRODUCT);
     assert.equal(submit.tk, "ticket-1");
     assert.equal(submit.pw === "pw", false);
-    const power = JSON.parse(String(submit.pVParam)) as { x: string; t: number; sign: number };
+    const power = submit.pVParam as {
+      puzzle?: unknown;
+      spendTime?: unknown;
+      runTimes?: unknown;
+      sid?: unknown;
+      args?: unknown;
+    };
+    // pVParam is the nested OBJECT the real client sends, with `args` as a JSON string
+    // inside it — not a flat JSON string. Getting that wrong is what produced 401/dt=02
+    // for an entire round (see docs/adr/0005-urs-http-login.md).
+    assert.equal(typeof power, "object");
+    assert.equal(power.sid, "sid-1");
+    assert.equal(power.runTimes, 2);
+    assert.equal(typeof power.args, "string");
+    const inner = JSON.parse(String(power.args)) as { x: string; t: number; sign: number };
     // x=3, mod=0x100, t=2: 3 -> 9 -> 81 = 0x51
-    assert.equal(power.x, "51");
-    assert.equal(power.t, 2);
-    assert.equal(typeof power.sign, "number");
+    assert.equal(inner.x, "51");
+    assert.equal(inner.t, 2);
+    assert.equal(typeof inner.sign, "number");
+    // the real client always sends the 十天内免登录 pair
+    assert.equal(submit.l, 1);
+    assert.equal(submit.d, 10);
     // the ticket request must not leak the password
     assert.equal(JSON.stringify(calls.slice(0, 3)).includes('"pw"'), false);
   });

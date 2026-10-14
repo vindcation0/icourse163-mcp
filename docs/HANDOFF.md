@@ -10,9 +10,16 @@
 
 ## 1. 一句话现状
 
-**刷课已经完全可用且不需要浏览器**（签名 RPC 通道，约 1.4 秒/单元）；
-**登录仍以浏览器路径为主**，纯 HTTP 登录的握手部分已逆向并实测打通，最后一步（提交密码）未验证成功，
-原因收窄到"邮箱通道对本产品未开放"，**手机通道能否打通需要一个真实账号来回答**。
+**整条流水线（登录 + 刷课）都不再需要浏览器了。**
+
+- **刷课**：签名 RPC 通道，约 1.4 秒/单元，已实测
+- **登录**：纯 HTTP 通道（`npm run login:http`），约 3.6 秒，**已实测产出可用会话**
+  （`check:rpc` 报 `session ok`、`mooc.py status` 报可用）
+- 浏览器登录保留为回退路径（能处理验证码）
+
+前三次对 `401 dt:02` 的判断都是错的；真正的根因是**提交载荷里 `pVParam` 的结构**（应为嵌套对象，
+不是 JSON 字符串）外加缺 `l`/`d` 两个字段。解法与三次错判的完整记录见
+[docs/adr/0005-urs-http-login.md](adr/0005-urs-http-login.md)。
 
 ---
 
@@ -49,7 +56,7 @@ npm run check:rpc --silent -- --course-id 1450750234 --term-id 1475848441 --scho
 | 会话状态体检 | ✅ 可用 | MCP `session_status`，或 `mooc.py status` |
 | 签名 RPC 能力探测 | ✅ 可用 | `npm run check:rpc` |
 | 登录（浏览器） | ✅ 可用 | `npm run login` |
-| 登录（纯 HTTP） | ⚠️ **握手已验证，提交未验证** | `npm run login:http -- -u <手机号>` |
+| 登录（纯 HTTP） | ✅ **可用，无浏览器，~3.6s** | `npm run login:http -- -u <手机号> --channel phone` |
 | 测验 / 作业答题辅助 | 🟡 工具已存在，**端到端未验证** | MCP `get_homework` / `save_homework_answers` / `submit_homework` |
 | 考试代交 | ❌ 明确不做 | — |
 
@@ -190,45 +197,50 @@ if (!r.NTESSTUDYSI) document.cookie = "NTESSTUDYSI=".concat(y, ";path=/")
 
 ---
 
-## 6. 未闭合的问题与精确的下一步
+## 6. 已闭合：纯 HTTP 登录（原"未闭合问题"）
 
-### 唯一未闭合的问题
-
-> **纯 HTTP 登录的手机通道（`/zj/yd/pwd/l`，产品唯一提供的通道）能否用真实账号打通？**
-
-已知：握手四步（`ini` → `powGetP` → VDF → `gt`）全部实测打通，`gt` 会签发 ticket。
-未知：提交那一步能否返回 `ret:201` 并给出会话 cookie。
-
-### 为什么本仓不自我验证
-
-- 需要真实凭据，而**密码不该经过 AI/本仓**（这也是 MCP 设计上不收密码的原因）
-- 用**猜**出来的手机号去试探，有可能打扰真实用户 → 不做
-
-### 下一步实验（30 秒，由你来做）
+> **原来唯一的未闭合问题是"手机通道能否用真实账号打通"。答案：能。**
 
 ```powershell
-npm run login:http --silent -- -u <你的手机号> --channel phone
-# 密码走隐藏输入，不显示、不进历史
+npm run login:http --silent -- -u <手机号> --channel phone
+# 约 3.6 秒 → LOGIN_OK has_cookie=true / 会话落地：API 令牌=有  网页会话=有
+# 随后 check:rpc 报 session ok，mooc.py status 报可用
 ```
 
-判读：
+### 根因与两个关键步骤
 
-| 结果 | 含义 | 下一步 |
-|---|---|---|
-| `LOGIN_OK` | 整条流水线彻底不需要浏览器 | 把 `login:http` 设为默认，收工 |
-| `ret 441/444/445/447` | 真的遇到验证码 | 纯 HTTP 到头，`npm run login` 保持默认，标记目标完成（边界已诚实说明） |
-| 其他 `ret`/`dt` | 新线索 | 记下码值，回到 bundle 找权威定义（见第 5 节方法） |
+1. **`pVParam` 必须是嵌套对象**，不是 JSON 字符串：
 
-### 其他次要未验证项
+   ```json
+   "pVParam": { "puzzle":"…", "spendTime":1000, "runTimes":320098,
+                "sid":"…", "args":"{\"x\":\"…\",\"t\":320098,\"sign\":…}" }
+   ```
+   注意其 `args` 成员**本身是 JSON 字符串**。另外真实客户端还会发 `l:1, d:10`。
+   （`pwdKeyUp` / `clientToken` 这条路**不发** —— 实测确认。）
 
-- **成功登录后的会话落地步骤**：真实客户端在 `/l` 成功后可能还需一步跳转
-  （`/dl/zj/*/go`、`/dl/common/setCookie`）才把会话种到 `icourse163.org`。
-  因为没有一次成功的 `/l`，这条链路**没有实测证据**；CLI 因此在成功时会检查
-  cookie 里有没有 `NTESSTUDYSI` 并提示去验证，**不假装成功**
-- `l`/`d`（十天内免登录）字段未测试
-- `domains` 取值未最终确认（实测完整邮箱放在 `un` 里是对的；拆分形式被 `gt` 拒）
+2. **会话落地是必需的第二步**：`{"ret":"201"}` 只种 `.163.com` 的 cookie。
+   再 `GET https://www.icourse163.org/`（会跳到 `/passport/logingate/changeCookie.htm`）
+   → 得到 `STUDY_INFO`/`STUDY_SESS`/`STUDY_PERSIST`；再 `GET /member/login.htm` → 得到
+   `NTESSTUDYSI`。已实现为 `ursLandSession()`。
+
+3. **存储坑**：落地后完整 cookie 约 1703 字符，**超过 Windows 凭据管理器 2560 字节上限** →
+   keychain 写入失败回退到文件，而 `getCookie` 优先读 keychain → 读到过期的短值，
+   表现为"登录成功但工具报 auth_expired"。现在只保留 7 个必要 cookie（约 990 字符）。
+
+### 为什么这次能解决
+
+前三轮都在读混淆代码的局部片段推断语义。最后是**让真实客户端登录一次、抓下它自己的请求、
+用已还原的 SM4 密钥解密** —— 一次拿到全部字段。
+
+> **前半段把 SM4 密钥和算法完全还原，正是后半段能一步到位的前提。**
+> 只抓包会卡在"看不懂密文"；只读代码就会在推断里打转。两者结合才是最短路径。
+
+### 仍然未做
+
 - `RECUR_HASHCASH` / `sequFun` 两种 `hashFunc` **未实现**（遇到时明确报错拒绝，不猜测）
-- 测验/作业答题辅助（`get_homework` → 填答 → `save_homework_answers` → `submit_homework`）端到端未验证
+- 验证码路径（`441/444/445/447`）未实测 —— 需人机交互，届时回退 `npm run login`
+- 测验/作业答题辅助（`get_homework` → 填答 → `save_homework_answers` → `submit_homework`）
+  端到端未验证
 
 ---
 

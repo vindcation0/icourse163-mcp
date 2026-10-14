@@ -117,28 +117,31 @@ npm run login --silent
 3. 登录后用 `npm run check:rpc --silent -- --course-id <id> --term-id <id> --school <S>` 验证：
    它会同时确认会话可用与签名请求可用（约 2 秒）
 
-### 纯 HTTP 登录（实验性，不需要浏览器）
+### 纯 HTTP 登录（已实测可用，不需要浏览器）
 
 `npm run login:http` 在 Node 里复现 URS 组件的请求，全程不起浏览器：SM4 加密的参数信封、
 一个必须实打实烧掉约 1 秒 CPU 的工作量证明（VDF + MurmurHash3）、以及 RSA 加密的密码。
-原理、证据与边界见 [docs/adr/0005-urs-http-login.md](adr/0005-urs-http-login.md)。
+原理、证据、三次判断更正与根因见 [docs/adr/0005-urs-http-login.md](adr/0005-urs-http-login.md)。
 
 ```powershell
-npm run login:http --silent -- -u <手机号或邮箱> --channel mail   # 密码走隐藏输入
+npm run login:http --silent -- -u <手机号> --channel phone   # 密码走隐藏输入，约 3.6 秒
 ```
 
-**它可能失败。** 两点如实说明：
+**实测结果**：`LOGIN_OK has_cookie=true`，会话落地后 `check:rpc` 报 `session ok`、
+`mooc.py status` 报可用。
 
-- **邮箱通道对本产品未开放。** icourse163 的登录界面上「网易邮箱账号登录」标签是隐藏的。
-  `ini`/`powGetP`/`gt` 这些共享管线都能通（`gt` 甚至会为邮箱签发 ticket），但提交那一步会被
-  拒（`401` + `dt:"02"`）。**所以请用默认的 `--channel phone`。**
-- **手机通道能否用真实账号打通，本仓无法自我验证** —— 那需要真实凭据，只能你自己跑。
-  用猜测的手机号去试探有可能打扰真实用户，所以本仓不去做。
+两点须知：
+
+- **必须用 `--channel phone`**。icourse163 的登录界面上「网易邮箱账号登录」标签是隐藏的，
+  邮箱通道对本产品未开放（`ini`/`powGetP`/`gt` 这些共享管线能通，`/l` 会被拒）。
+- **「会话落地」是必需的第二步**：`{"ret":"201"}` 只种 `.163.com` 的 cookie，还需访问
+  `icourse163.org`（会跳到 `/passport/logingate/changeCookie.htm`）才换来 `STUDY_*`，
+  再访问 `/member/login.htm` 换来 `NTESSTUDYSI`。本仓已用 `ursLandSession()` 自动完成。
 
 服务端要求验证码时（码为 `441/444/445/447`），CLI 会明确报出，此时请用 `npm run login`。
 
-**最终判断：`npm run login`（浏览器）仍是默认路径，`login:http` 是快路径。** 两者共用同一份
-凭据存储，谁成功都可以直接被 MCP 工具使用。原理与两次判断更正见
-[docs/adr/0005-urs-http-login.md](adr/0005-urs-http-login.md)。
+**`npm run login`（浏览器）仍是可靠回退** —— 它能处理验证码。两者共用同一份凭据存储，
+谁成功都可以直接被 MCP 工具使用。
+
 
 

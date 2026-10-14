@@ -57,6 +57,11 @@ export type UrsHttp = {
     body: string,
     headers: Record<string, string>,
   ): Promise<UrsHttpResponse>;
+  /** Used by `ursLandSession`; optional so tests can stub only `post`. */
+  get?(
+    url: string,
+    headers: Record<string, string>,
+  ): Promise<UrsHttpResponse & { finalUrl?: string }>;
 };
 
 /** 32 random alphanumerics, matching the bundle's `_p.getRtid`. */
@@ -196,6 +201,16 @@ export function createUrsHttp(): UrsHttp {
           : [];
       return { statusCode: response.status, body: text, setCookie };
     },
+    async get(url, headers) {
+      // Landing relies on the redirect chain, so follow it here.
+      const response = await fetch(url, { method: "GET", headers, redirect: "follow" });
+      const text = await response.text();
+      const setCookie =
+        typeof response.headers.getSetCookie === "function"
+          ? response.headers.getSetCookie()
+          : [];
+      return { statusCode: response.status, body: text, setCookie, finalUrl: response.url };
+    },
   };
 }
 
@@ -258,6 +273,115 @@ const RESPONSE_MESSAGES: Record<string, string> = {
  * 账号格式错误.)
  */
 const CAPTCHA_CODES = new Set(["441", "444", "445", "447", "108", "109", "110", "111"]);
+
+/**
+ * `{"ret":"201"}` on its own is not a usable session: the URS login only sets
+ * `.163.com` cookies. icourse163.org exchanges those for its own session, and the page
+ * the browser lands on is what triggers it.
+ *
+ * Measured: `GET https://www.icourse163.org/` redirects to
+ * `/passport/logingate/changeCookie.htm?type=ursCellphone...`, which sets STUDY_INFO,
+ * STUDY_SESS and STUDY_PERSIST; a following `GET /member/login.htm` sets NTESSTUDYSI
+ * (the API token every tool needs). Doing those two GETs is the whole landing step.
+ */
+export const URS_LANDING_URLS = [
+  "https://www.icourse163.org/",
+  "https://www.icourse163.org/member/login.htm",
+] as const;
+
+/**
+ * Cookies worth keeping after landing. The URS `.163.com` ones (NTES_YD_SESS,
+ * NTES_PASSPORT, l_yd_sign, …) mean nothing to icourse163.org, and keeping them pushed
+ * the stored value past the Windows keychain's 2560-byte limit — which made the write
+ * fail, fall back to the file, and leave the keychain holding a stale, shorter cookie
+ * that `getCookie` then preferred. Trimming the session to what the tools actually use
+ * keeps it comfortably inside the limit (about 900 chars).
+ *
+ * NTES_YD_PASSPORT is retained so the landing step can be repeated later.
+ */
+const SESSION_COOKIE_NAMES = [
+  "NTESSTUDYSI",
+  "STUDY_INFO",
+  "STUDY_SESS",
+  "STUDY_PERSIST",
+  "EDUWEBDEVICE",
+  "NETEASE_WDA_UID",
+  "NTES_YD_PASSPORT",
+] as const;
+
+function selectSessionCookies(jar: Jar): string {
+  const parts: string[] = [];
+  for (const name of SESSION_COOKIE_NAMES) {
+    const value = jar.get(name);
+    if (value != null && value !== "") {
+      parts.push(`${name}=${value}`);
+    }
+  }
+  return parts.join("; ");
+}
+
+export type UrsLandResult = {
+  ok: boolean;
+  /** The cookie header to store: URS cookies merged with the icourse163 ones. */
+  cookie: string;
+  /** `NTESSTUDYSI` — required by every RPC tool. */
+  hasApiToken: boolean;
+  /** `STUDY_INFO` + `STUDY_SESS` — required by the Playwright path. */
+  hasWebSession: boolean;
+  finalUrl: string;
+  message: string;
+};
+
+export async function ursLandSession(input: {
+  cookie: string;
+  http?: UrsHttp;
+  userAgent?: string;
+}): Promise<UrsLandResult> {
+  const http = input.http ?? createUrsHttp();
+  const jar: Jar = new Map();
+  for (const pair of input.cookie.split(";")) {
+    const trimmed = pair.trim();
+    const eq = trimmed.indexOf("=");
+    if (eq > 0) {
+      jar.set(trimmed.slice(0, eq), trimmed.slice(eq + 1));
+    }
+  }
+  if (http.get == null) {
+    return {
+      ok: false,
+      cookie: input.cookie,
+      hasApiToken: /NTESSTUDYSI=/.test(input.cookie),
+      hasWebSession: /STUDY_INFO=/.test(input.cookie),
+      finalUrl: "",
+      message: "the transport cannot perform GET, so the session could not be landed",
+    };
+  }
+
+  let finalUrl = "";
+  for (const url of URS_LANDING_URLS) {
+    const response = await http.get(url, {
+      "user-agent": input.userAgent ?? USER_AGENT,
+      cookie: jarHeader(jar),
+      referer: URS_TOP_URL,
+    });
+    absorbCookies(jar, response.setCookie);
+    finalUrl = response.finalUrl ?? url;
+  }
+
+  const cookie = selectSessionCookies(jar);
+  const hasApiToken = jar.has("NTESSTUDYSI") && jar.get("NTESSTUDYSI") !== "";
+  const hasWebSession = jar.has("STUDY_INFO") && jar.has("STUDY_SESS");
+  return {
+    ok: hasApiToken,
+    cookie,
+    hasApiToken,
+    hasWebSession,
+    finalUrl,
+    message: hasApiToken
+      ? "session landed"
+      : "landing did not yield NTESSTUDYSI, so the RPC tools cannot use this session",
+  };
+}
 
 /**
  * Runs the whole login over HTTP. Performs no request beyond the five URS calls, and
@@ -394,6 +518,15 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
   }
 
   // 4. submit. The phone channel is /yd/pwd/l; the email channel is /mail/l.
+  //
+  // The shape below was read off a real browser login, captured and decrypted with the
+  // SM4 key (see docs/adr/0005-urs-http-login.md). Two things are easy to get wrong and
+  // both produce a bare `401`:
+  //   - pVParam is a nested OBJECT carrying the original puzzle and sid, and its `args`
+  //     member is itself a JSON string. Sending a flat JSON string is rejected.
+  //   - `l`/`d` (十天内免登录) are present on every real submit.
+  // pwdKeyUp and clientToken are NOT sent on this path: clientToken only appears when
+  // the ini response carries watchman:"1", which it does not for this product.
   const submitPath = channel === 1 ? "/dl/zj/yd/pwd/l" : "/dl/zj/mail/l";
   const submit = await call(submitPath, {
     ...base,
@@ -401,7 +534,15 @@ export async function ursLogin(options: UrsLoginOptions): Promise<UrsLoginResult
     pw: ursEncryptPassword(options.password),
     tk: ticket,
     domains: "",
-    pVParam: JSON.stringify({ x: power.x, t: power.t, sign: power.sign }),
+    l: 1,
+    d: 10,
+    pVParam: {
+      puzzle: String(args.puzzle ?? ""),
+      spendTime: power.spendTime,
+      runTimes: power.runTimes,
+      sid: String(pvInfo?.sid ?? ""),
+      args: JSON.stringify({ x: power.x, t: power.t, sign: power.sign }),
+    },
     pkht: "www.icourse163.org",
     rtid,
   });

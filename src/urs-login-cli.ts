@@ -3,7 +3,7 @@ import type { Writable } from "node:stream";
 
 import { createLocalCredentialStore } from "./credentials";
 import { redactLoginSecrets } from "./open-login";
-import { ursLogin, type UrsChannel } from "./urs-login";
+import { ursLandSession, ursLogin, type UrsChannel } from "./urs-login";
 
 /**
  * Pure-HTTP login for URS (no browser). Shares the credential store with the
@@ -184,29 +184,29 @@ export async function runUrsLoginCli(input: {
     const result = await ursLogin({ account: username.trim(), password, channel: flags.channel });
     const safe = (text: string) => redactLoginSecrets(text, credentials);
     if (result.ok) {
+      // {"ret":"201"} only sets .163.com cookies; the icourse163.org session comes from
+      // landing on the site. Without this step the stored cookie has no NTESSTUDYSI and
+      // every tool would report auth_expired.
+      const landed = await ursLandSession({ cookie: result.cookie });
       const store = createLocalCredentialStore({ env: input.env });
-      await store.setCookie(result.cookie);
+      await store.setCookie(landed.cookie);
       input.io.stdout.write(`LOGIN_OK has_cookie=true\n`);
-      input.io.stdout.write(`  获得的 cookie：${result.cookie.replace(/=([^;]{4})[^;]*/g, "=$1…")}\n`);
-      if (!/NTESSTUDYSI=/.test(result.cookie)) {
-        input.io.stdout.write(
-          "  注意：这次响应里没有 NTESSTUDYSI，URS 通常还需要一步跳转才会把会话种到 icourse163.org；\n" +
-            "  请用 `npm run login --silent -- --check` 确认会话是否真的可用。\n",
-        );
+      input.io.stdout.write(
+        `  会话落地：API 令牌=${landed.hasApiToken ? "有" : "无"}  网页会话=${landed.hasWebSession ? "有" : "无"}\n`,
+      );
+      if (!landed.ok) {
+        input.io.stderr.write(`  ${safe(landed.message)}\n`);
+        input.io.stderr.write("  请改用浏览器登录：npm run login\n");
+        return 1;
       }
+      input.io.stdout.write(
+        "  验证：npm run check:rpc --silent -- --course-id <id> --term-id <id> --school <S>\n",
+      );
       return 0;
     }
     input.io.stderr.write(`${safe(result.message)}\n`);
     input.io.stderr.write(`  阶段=${result.stage} ret=${result.ret ?? "-"} dt=${result.dt ?? "-"}\n`);
-    if (result.ret === "401" && result.dt === "02") {
-      input.io.stderr.write(
-        "  服务端在提交这一步拒了这个账号。注意：icourse163 的登录界面上「网易邮箱账号登录」\n" +
-          "  那个标签是隐藏的，邮箱通道对本产品未开放，所以邮箱通道拿不到成功结果 —— 这不是\n" +
-          "  请求构造的问题（同一个账号在 gt 那一步是能拿到 ticket 的）。\n" +
-          "  请用手机通道配合你的真实账号重试：npm run login:http --silent -- -u <手机号>\n" +
-          "  或直接用浏览器登录：npm run login\n",
-      );
-    } else if (result.needsCaptcha) {
+    if (result.needsCaptcha) {
       input.io.stderr.write(
         "  服务端要求验证码（这是 _isCapCode 认定的验证码码）。这属于自适应风控，\n" +
           "  需要人机交互，请改用浏览器登录：npm run login\n",
