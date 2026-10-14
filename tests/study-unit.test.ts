@@ -6,7 +6,7 @@ import { learnReferer } from "../src/course-rpc";
 import {
   LEARN_VO_RPC_URL,
   SAVE_LEARN_RPC_URL,
-  buildDocLearnDto,
+  buildDocLearnReport,
   buildVideoLearnReport,
   clampPageIntervalSec,
   findUnitInMocTerm,
@@ -228,17 +228,45 @@ describe("buildVideoLearnReport", () => {
 });
 
 
-describe("buildDocLearnDto", () => {
-  test("builds finished doc dto for saveMocContentLearn", () => {
-    const dto = buildDocLearnDto({
-      unit_id: "402",
+// Shape captured from the platform's own client while it turned PDF pages.
+describe("buildDocLearnReport", () => {
+  test("builds the captured doc report", () => {
+    const dto = buildDocLearnReport({
+      course_id: "1450750234",
+      term_id: "1475848441",
+      lesson_id: "1265444035",
+      unit_id: "1305575053",
       content_type: 3,
-      page_count: 9,
+      page_count: 18,
+      learned_sec: 2,
+      now: 1791966259056,
     });
-    assert.equal(dto.unitId, 402);
+    assert.equal(dto.unitId, 1305575053);
     assert.equal(dto.contentType, 3);
     assert.equal(dto.finished, true);
-    assert.equal(dto.pageNum, 9);
+    assert.equal(dto.index, 0);
+    assert.equal(dto.pageNum, 18);
+    assert.equal(dto.courseId, 1450750234);
+    assert.equal(dto.lessonId, 1265444035);
+    assert.equal(dto.termId, 1475848441);
+    assert.equal(dto.lastLearnTime, 1791966259056);
+    assert.equal(dto.learnedVideoTimeCount, 2);
+  });
+
+  // pageNum is not validated by the server: 18 / 1 / 9999 / omitted all return
+  // code 0, and an incomplete doc reaches completePercent 1 without it. So an
+  // unknown page count must not block the report.
+  test("omits pageNum when the page count is unknown", () => {
+    const dto = buildDocLearnReport({
+      course_id: "1",
+      term_id: "2",
+      lesson_id: "3",
+      unit_id: "4",
+      content_type: 3,
+      page_count: null,
+    });
+    assert.equal("pageNum" in dto, false);
+    assert.equal(dto.learnedVideoTimeCount, 2);
   });
 });
 

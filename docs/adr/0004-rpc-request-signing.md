@@ -84,7 +84,28 @@ auth-signature = MD5( <body 的 JSON 原文> + <nonce> + <timestamp> + "fu2s2kxc
 - `action: "LEARN_TIME_COUNT"` 表明这是**增量**上报：浏览器每约 60 秒报一次
   `learnedVideoTimeCount`，进度按块累加。这解释了为什么真播推进是跳跃式的。
 - `videoTime` = 视频总秒数；`duration` = 本次上报对应的毫秒数。
-- `userId` 来自课程面板 RPC（`learnerRpcBean.getMyLearnedCoursePanelList`）。
+- `userId` 出现在浏览器报文里，但**不是必需的**：不带它同样返回 `code:0`（实测），
+  所以不需要为它多打一次课程面板 RPC。
+
+### 载荷形状（文档 / PDF / PPT）
+
+同一端点，同一签名，字段不同（在一份 PDF 上翻页时捕获）：
+
+```json
+{"dto":{
+  "unitId":1305575053, "finished":true, "contentType":3, "index":0, "pageNum":18,
+  "courseId":1450750234, "lessonId":1265444035, "termId":1475848441,
+  "lastLearnTime":1791966259056, "learnedVideoTimeCount":2
+}}
+```
+
+要点：
+
+- `contentType` 沿用单元类型（3 = PDF/PPT，4 = 富文本）。
+- **`pageNum` 不被校验**：实测 `18` / `1` / `9999` / 不传，四种都返回 `code:0`；一个原本
+  `completePercent=0` 的文档在**不传 `pageNum`** 的情况下也到达了 `completePercent=1`。
+  因此文档路径不需要知道真实页数，也就摆脱了对坏掉的 `getLessonUnitLearnVo` 的依赖。
+- `lastLearnTime` 是毫秒时间戳；`learnedVideoTimeCount` 是本次学习秒数（文档也复用该字段名）。
 
 ### `getLessonUnitLearnVo` 不是 RPC
 
@@ -94,6 +115,9 @@ auth-signature = MD5( <body 的 JSON 原文> + <nonce> + <timestamp> + "fu2s2kxc
 浏览器: POST /dwr/call/plaincall/CourseBean.getLessonUnitLearnVo.dwr   (text/plain)
 本仓:   POST /web/j/courseBean.getLessonUnitLearnVo.rpc                → 001:系统异常
 ```
+
+由于视频有目录 `durationInSeconds`、文档的 `pageNum` 又非必需，这个接口在本仓的两条路径上
+都不再是阻塞项。
 
 视频路径本来就有目录 `durationInSeconds` 兜底，所以不受影响；文档路径需要 `textPages`，才是真正
 受影响的。
@@ -115,17 +139,29 @@ auth-signature = MD5( <body 的 JSON 原文> + <nonce> + <timestamp> + "fu2s2kxc
 
 ## 决策与后果
 
-1. 本仓的 RPC 通道**应当实现签名**，而不是继续依赖浏览器回退。签名后 RPC 比 Playwright 快
-   4~5 个数量级（毫秒 vs 数分钟），且不依赖易失的网页会话——本项目绝大多数排障时间都花在
-   网页会话反复失效上。
-2. `transport=auto` 的回退设计依然正确（服务端策略可能变化），但正常情况下不应再触发回退。
-3. 文档（`contentType` 3/4）的上报契约**尚未捕获**，仍应走浏览器路径；需要另行抓包确认。
-4. `npm run check:rpc` 的判定口径需要修正：它当前把 `-10006` / `并发限制` 判为"被封锁"，
-   而它们实际是"缺签名"。修正后应报告"需要签名"而非"不可用"。
-5. 不要再把 `-10006` 或 `并发限制` 解读为风控封锁——这是本 ADR 初版犯过的错。
+1. **已实现签名**（`src/rpc-sign.ts`），视频与文档两条 RPC 路径都已打通。实测：
+   - 视频 `1305575052`：`transport=rpc` → `status=ok completed=true percent=100`，**1.42 秒**
+   - 文档 `1308829002`（**另一个学期**，原本 `completePercent=0`）：一次调用 **0 → 1**
+   - 同一文档经 `study_unit` + `transport=rpc`：**1.46 秒**（浏览器路径约 30 秒）
 
-## 遗留问题
+   提速 20 倍以上，且不再需要 Chrome，也不再依赖那个反复失效的网页会话。
+2. `transport=auto` 的回退设计保留且必要：若站点轮换签名密钥或算法，签名请求会重新开始被拒，
+   `auto` 会自动降回浏览器路径。
+3. **`pageNum` 不被服务端校验**（实测 18 / 1 / 9999 / 不传，四种都 `code:0`；且一个未完成文档
+   在不传 `pageNum` 时也能到达 `completePercent=1`）。因此文档路径**不再需要**
+   `getLessonUnitLearnVo` 提供 `textPages`，也就绕开了那个恒返回 `001:系统异常` 的坏接口 ——
+   文档路径现在完全无头。
+4. `check:rpc` 的判定口径已同步更新：`-10006` / `并发限制` 不再被描述为"被封锁"，而是
+   "签名未通过验证"。
+5. **不要把 `-10006` 或 `并发限制` 解读为风控封锁** —— 这是本 ADR 初版犯过的错，代价是一整轮
+   误判与大量无效排障。
 
-- `nonce` 的取值范围（1000~10000）与 `timestamp` 的时效窗口未知；`Date.now()` 实测可用。
-- 签名密钥 `fu2s2kxcswgn5hqanx7asmlogyr5wu29` 是站点前端硬编码，服务端更换时此 ADR 需同步更新。
-- 文档类型的签名上报契约待捕。
+## 尚未验证 / 遗留
+
+- `index` 字段语义未完全确认（视频用 1、文档用 0，均被接受）。
+- 增量上报（真实客户端 `learnedVideoTimeCount` 每次约 60 秒）本仓未采用：实测一次性上报全时长
+  即可完成，但这意味着进度曲线不像真人。若要更自然的痕迹，需改为分块、按时间间隔上报。
+- 签名密钥 `fu2s2kxcswgn5hqanx7asmlogyr5wu29` 是站点前端硬编码；服务端若轮换，需同步更新本
+  ADR 与 `src/rpc-sign.ts`。
+- `nonce` 取值范围（1000~10000）与 `timestamp` 时效窗口未知；`Date.now()` 实测可用。
+

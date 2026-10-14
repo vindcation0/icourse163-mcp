@@ -239,18 +239,38 @@ export function buildVideoLearnReport(input: {
   };
 }
 
-export function buildDocLearnDto(input: {
+/**
+ * Body for `saveMocContentLearn` on a doc (PDF / PPT / rich text) unit, captured
+ * from the platform's own client. `pageNum` is included when the page count is
+ * known, but the server does not validate it — an incomplete doc reaches
+ * completePercent 1 even with pageNum omitted — so an unknown page count is not
+ * fatal (unlike the old shape, which required textPages from a broken RPC).
+ */
+export function buildDocLearnReport(input: {
+  course_id: string;
+  term_id: string;
+  lesson_id: string;
   unit_id: string;
   content_type: number;
-  page_count: number;
-}): DocLearnDto {
-  const pageNum = Math.max(1, Math.floor(input.page_count));
-  return {
+  page_count?: number | null;
+  learned_sec?: number;
+  now?: number;
+}): Record<string, unknown> {
+  const dto: Record<string, unknown> = {
     unitId: Number(input.unit_id),
-    contentType: input.content_type,
     finished: true,
-    pageNum,
+    contentType: input.content_type,
+    index: 0,
+    courseId: Number(input.course_id),
+    lessonId: Number(input.lesson_id),
+    termId: Number(input.term_id),
+    lastLearnTime: input.now ?? Date.now(),
+    learnedVideoTimeCount: Math.max(1, Math.floor(input.learned_sec ?? 2)),
   };
+  if (input.page_count != null && input.page_count > 0) {
+    dto.pageNum = Math.max(1, Math.floor(input.page_count));
+  }
+  return dto;
 }
 
 export async function studyUnit(
@@ -830,51 +850,41 @@ async function studyDocUnit(input: {
     referer,
   });
 
-  // PDF (3): need textPages. Rich text (4): OCS reloads; mark finished with pageNum 1.
+  // pageNum is OPTIONAL in the real contract: the server does not validate it
+  // (verified with 18 / 1 / 9999 / omitted, all code 0), and an incomplete doc
+  // goes to completePercent 1 with it omitted entirely. So a missing textPages is
+  // no longer fatal — it only means we cannot echo the page count back.
   let pageCount = learnVo?.textPages ?? null;
   if (pageCount == null && contentType === 4) {
     pageCount = 1;
   }
-  if (pageCount == null || pageCount <= 0) {
-    const detail =
-      "Could not resolve doc textPages (getLessonUnitLearnVo failed; page/API structure may have changed)";
-    // The browser path reads the page count from the DOM
-    // (.ux-h5pdfreader_container_footer_pages_total), so it does not need
-    // textPages at all. Without this fallback the doc path dead-ends here and
-    // never gets the chance the video path already has.
-    if (transport === "auto") {
-      return runPlaywrightStudy({
-        base,
-        courseId,
-        termId,
-        unitId,
-        located,
-        course,
-        session,
-        ports,
-        playbackRate,
-        pageIntervalSec,
-        skipToEnd,
-        unitType: "doc",
-        priorErrors: [{ where: "learn_vo", message: detail }],
-      });
-    }
+
+  if (pageIntervalSec > 0 && pageCount != null && pageCount > 1) {
+    const turns = pageCount - 1;
+    await sleepMs(turns * pageIntervalSec * 1000);
+  }
+
+  if (located.lesson_id == null) {
     return {
       ...base,
       isError: true,
       status: "page_structure_change",
       unit_type: "doc",
       page_interval_sec: pageIntervalSec,
-      errors: [{ where: "learn_vo", message: detail }],
+      errors: [
+        {
+          where: "term",
+          message:
+            "Unit has no lesson id in the term catalog, so the signed learn report cannot be built",
+        },
+      ],
     };
   }
 
-  if (pageIntervalSec > 0 && pageCount > 1) {
-    const turns = pageCount - 1;
-    await sleepMs(turns * pageIntervalSec * 1000);
-  }
-
-  const dto = buildDocLearnDto({
+  const dto = buildDocLearnReport({
+    course_id: courseId,
+    term_id: termId,
+    lesson_id: located.lesson_id,
     unit_id: unitId,
     content_type: contentType,
     page_count: pageCount,

@@ -27,7 +27,7 @@ import { asArray, asFiniteNumber, asId, asNonEmptyString, asRecord, parseJsonObj
 import { fetchMocTermDto, learnReferer, resolveSession } from "./course-rpc";
 import {
   LEARN_VO_RPC_URL,
-  buildDocLearnDto,
+  buildDocLearnReport,
   buildVideoLearnReport,
   fetchLessonUnitLearnVo,
   saveLearnDto,
@@ -194,7 +194,7 @@ console.log(
 );
 console.log(
   learnVo == null
-    ? "verdict      : USELESS — docs cannot get textPages, so their RPC path dead-ends (auto now hands them to the browser); videos still work off the catalog durationInSeconds"
+    ? "verdict      : USELESS but no longer blocking — videos fall back to the catalog durationInSeconds, and docs no longer need a page count because pageNum is not validated"
     : "verdict      : usable",
 );
 
@@ -202,15 +202,20 @@ console.log(
 console.log("\n--- gate 2: saveMocContentLearn (writes progress) ---");
 let dto: unknown;
 if (contentType === 3 || contentType === 4) {
-  const pageCount = learnVo?.textPages ?? null;
-  if (pageCount == null || pageCount <= 0) {
-    console.log("dto          : skipped — doc page count unavailable, so no safe payload to send");
-    console.log("verdict      : INCONCLUSIVE (gate 1 already blocks the doc RPC path)");
-    console.log("\n=== OVERALL ===");
-    console.log("RPC progress reporting cannot be verified for docs on this session.");
+  if (target.lessonId == null) {
+    console.log("dto          : skipped — catalog lacks a lessonId for this unit");
+    console.log("verdict      : INCONCLUSIVE");
     process.exit(0);
   }
-  dto = buildDocLearnDto({ unit_id: target.unitId, content_type: contentType, page_count: pageCount });
+  // pageNum is optional; the server does not validate it.
+  dto = buildDocLearnReport({
+    course_id: courseId,
+    term_id: termId,
+    lesson_id: target.lessonId,
+    unit_id: target.unitId,
+    content_type: contentType,
+    page_count: learnVo?.textPages ?? null,
+  });
 } else {
   if (target.durationSec == null || target.contentId == null || target.lessonId == null) {
     console.log("dto          : skipped — catalog lacks duration/contentId/lessonId for this unit");
@@ -239,17 +244,17 @@ if (saved.kind === "saved") {
   console.log("result       : saved (code 0)");
   console.log("verdict      : usable");
   console.log("\n=== OVERALL ===");
-  console.log("RPC progress reporting WORKS for this session. transport=rpc is viable and");
-  console.log("is much faster than the browser path; transport=auto will use it first.");
+  console.log("RPC progress reporting WORKS. This build signs its requests (src/rpc-sign.ts), so");
+  console.log("transport=rpc is viable and takes about a second, versus ~30s and a live browser");
+  console.log("session for the Playwright path.");
 } else {
   const where = saved.kind === "error" ? saved.where : "credentials";
   console.log(`result       : ${saved.kind} [${where}] ${saved.message}`);
-  console.log("verdict      : REJECTED — but this is a signature failure, not an anti-abuse block");
+  console.log("verdict      : REJECTED — not an anti-abuse ban");
   console.log("\n=== OVERALL ===");
-  console.log("-10006 (请检查本地时间是否和北京时间一致) and 并发限制 are the server's reply to a");
-  console.log("request whose auth-signature does not verify. They are NOT a risk-control ban:");
-  console.log("the same endpoint returns code 0 for a correctly signed request.");
-  console.log("This build sends no auth-signature / nonce / timestamp / system headers, so it is");
-  console.log("always rejected. See docs/adr/0004-rpc-request-signing.md for the algorithm.");
-  console.log("Until signing is implemented, use transport=auto so it falls back to the browser.");
+  console.log("-10006 (请检查本地时间是否和北京时间一致) and 并发限制 are what the server says when");
+  console.log("the auth-signature does not verify. They do NOT mean the account is blocked.");
+  console.log("This build DOES sign its requests (src/rpc-sign.ts), so a rejection here means");
+  console.log("the site changed the key or the digest construction — update that file.");
+  console.log("Meanwhile transport=auto still falls back to the browser, which keeps working.");
 }
