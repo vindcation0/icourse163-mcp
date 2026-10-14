@@ -363,6 +363,9 @@ async function navigateToUnitPlayer(
   await openCoursewareTab(page);
   await waitForCoursewareTree(page);
   await dismissLearnDialogs(page);
+  // Expand the collapsed chapters so the requested unit is actually clickable.
+  await expandCollapsedChapters(page);
+  await dismissLearnDialogs(page);
 
   // Exact id only: the name fallback must not run before the exact deeplink, or a
   // same-titled sibling unit can be selected and silently reported as success.
@@ -435,6 +438,45 @@ async function waitForCoursewareTree(page: Page): Promise<void> {
       timeout: 20_000,
     })
     .catch(() => undefined);
+}
+
+/**
+ * The 课件 tree renders only the last-learned chapter; every other chapter is
+ * collapsed and contributes no [data-cid] nodes until its header is clicked.
+ * Expanding them matters because the platform only credits learning that was
+ * entered by clicking the tree — a content-hash jump plays the media but is
+ * never recorded (observed: a deeplink-navigated unit stayed at
+ * completePercent 0.072 while tree-clicked siblings went to 1).
+ *
+ * Collapsed blocks are identified by having no [data-cid] descendants at all,
+ * which avoids depending on the caret icon classes (both carets are always in
+ * the DOM, one of them hidden).
+ */
+async function expandCollapsedChapters(page: Page): Promise<void> {
+  const chapters = page.locator(".m-learnChapterNormal");
+  const total = await chapters.count().catch(() => 0);
+  for (let index = 0; index < total; index += 1) {
+    const block = chapters.nth(index);
+    // .j-up (u-icon-caret-down) is visible only while the chapter is collapsed;
+    // both carets are always in the DOM, so visibility is the reliable signal.
+    // The trailing "course" block has neither caret -- clicking it tears down the
+    // whole tree -- so a collapsed-state check also keeps us off it.
+    const collapsed = await block
+      .locator(".j-up")
+      .first()
+      .isVisible()
+      .catch(() => false);
+    if (!collapsed) {
+      continue;
+    }
+    await block
+      .locator(".j-titleBox, .titleBox")
+      .first()
+      .click({ timeout: 3000, force: true })
+      .catch(() => undefined);
+    await page.waitForTimeout(600);
+  }
+  await page.waitForTimeout(1000);
 }
 
 async function clickUnitInTree(
