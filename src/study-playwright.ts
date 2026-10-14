@@ -26,6 +26,8 @@ const MEDIA_WAIT_MS = 90_000;
 const NAV_TIMEOUT_MS = 60_000;
 /** How long to wait for the PPT/PDF deck to render enough to count its pages. */
 const PPT_COUNT_WAIT_MS = 30_000;
+/** Settle time after the last page turn, so the platform can report the progress. */
+const PPT_SETTLE_MS = 4000;
 const QUIZ_SELECTOR = ".u-questionItem";
 const MEDIA_SELECTOR = "video, audio";
 const PDF_READER_SELECTOR = ".ux-pdf-reader";
@@ -746,13 +748,26 @@ async function readPptInPage(
       { totalSel: PDF_TOTAL_SELECTOR, currentSel: PDF_CURRENT_SELECTOR },
     );
 
-  // The reader element attaches before its slides exist, so the first read legitimately
-  // returns 0 pages. Poll until the deck has actually rendered.
+  // The reader element attaches before its slides exist, and the deck renders
+  // progressively, so the first non-zero count can be a partial one (observed:
+  // a unit written but left below 100% because too few pages were turned). Wait
+  // until the count repeats before trusting it.
   let pages = await readPageState();
   const countDeadline = Date.now() + PPT_COUNT_WAIT_MS;
-  while (pages.total <= 0 && Date.now() < countDeadline) {
+  let stableReads = 0;
+  while (Date.now() < countDeadline) {
     await sleepMs(500);
-    pages = await readPageState();
+    const next = await readPageState();
+    if (next.total > 0 && next.total === pages.total) {
+      stableReads += 1;
+      if (stableReads >= 2) {
+        pages = next;
+        break;
+      }
+    } else {
+      stableReads = 0;
+    }
+    pages = next;
   }
 
   if (pages.total <= 0) {
@@ -784,6 +799,12 @@ async function readPptInPage(
       await sleepMs(pageIntervalSec * 1000);
     }
   }
+
+  // Let the platform's progress reporter observe the final page before the caller
+  // closes the browser. A fast page sweep followed by an immediate close can leave
+  // the document uncredited even though every page was turned -- observed as the
+  // tool reporting ok while completePercent stayed at 0.
+  await sleepMs(PPT_SETTLE_MS);
 
   return {
     kind: "completed",
