@@ -22,6 +22,12 @@ export type TermUnit = {
   name: string;
   type: UnitType;
   learn_status: string | null;
+  /**
+   * Completion as a 0..1 fraction straight from the term catalog; `1` means done.
+   * Exposed so callers can skip finished units instead of re-studying them, since
+   * `learn_status` is null on courses whose catalog omits those fields.
+   */
+  complete_percent: number | null;
 };
 
 export type TermLesson = {
@@ -217,6 +223,7 @@ function unitFromRecord(raw: unknown): TermUnit | null {
     name: asNonEmptyString(unit.name) ?? "未命名单元",
     type: mapContentType(asFiniteNumber(unit.contentType)),
     learn_status: learnStatusFrom(unit),
+    complete_percent: asFiniteNumber(unit.completePercent),
   };
 }
 
@@ -247,6 +254,7 @@ function lessonFromChapterQuiz(
         name,
         type: "quiz",
         learn_status: learnStatusFrom(test, quiz),
+        complete_percent: asFiniteNumber(quiz.completePercent ?? test.completePercent),
       },
     ],
   };

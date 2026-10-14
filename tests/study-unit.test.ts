@@ -652,9 +652,80 @@ describe("studyUnit", () => {
     assert.equal(result.completed, false);
     assert.equal(result.transport, null);
     assert.match(result.errors[0]?.message ?? "", /10006/);
-    assert.match(result.errors[0]?.message ?? "", /docs\/mcp\.md/);
+    // The hint used to blame anti-abuse and the machine clock. It is a signature
+    // rejection: a correctly signed request to the same endpoint returns code 0.
+    assert.match(result.errors[0]?.message ?? "", /signature rejected/);
+    assert.match(result.errors[0]?.message ?? "", /0004-rpc-request-signing/);
   });
 
+});
+
+describe("saveMocContentLearn throttling", () => {
+  // A 7-unit batch was observed hitting 并发限制 on 4 of them when fired back to back.
+  // The save must retry those (rebuilding the signature, which covers timestamp/nonce)
+  // instead of surfacing a throttle as a hard failure.
+  test("retries 并发限制 and succeeds on a later attempt", async () => {
+    let saveAttempts = 0;
+    const { http } = recordingHttp((input) => {
+      const warmed = warmupOk(input);
+      if (warmed != null) {
+        return warmed;
+      }
+      if (input.url.startsWith(TERM_RPC_URL)) {
+        return { statusCode: 200, body: mocTermBody(CATALOG_WITH_VIDEO_META) };
+      }
+      if (input.url.startsWith(LEARN_VO_RPC_URL)) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { duration: 120, videoId: 9001 } }) };
+      }
+      if (input.url.startsWith(SAVE_LEARN_RPC_URL)) {
+        saveAttempts += 1;
+        if (saveAttempts === 1) {
+          return { statusCode: 200, body: JSON.stringify({ code: -2, message: "并发限制，请稍后再试" }) };
+        }
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: true }) };
+      }
+      throw new Error(`unexpected url ${input.url}`);
+    });
+
+    const result = await studyUnit(
+      { course_id: "1001", term_id: "2001", unit_id: "401", school_short_name: "SJTU", transport: "rpc" },
+      portsWith(async () => SESSION, http),
+    );
+
+    assert.equal(saveAttempts, 2);
+    assert.equal(result.status, "ok");
+    assert.equal(result.completed, true);
+    assert.equal(result.transport, "rpc");
+  });
+
+  test("does not retry a non-throttle failure", async () => {
+    let saveAttempts = 0;
+    const { http } = recordingHttp((input) => {
+      const warmed = warmupOk(input);
+      if (warmed != null) {
+        return warmed;
+      }
+      if (input.url.startsWith(TERM_RPC_URL)) {
+        return { statusCode: 200, body: mocTermBody(CATALOG_WITH_VIDEO_META) };
+      }
+      if (input.url.startsWith(LEARN_VO_RPC_URL)) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { duration: 120, videoId: 9001 } }) };
+      }
+      if (input.url.startsWith(SAVE_LEARN_RPC_URL)) {
+        saveAttempts += 1;
+        return { statusCode: 200, body: JSON.stringify({ code: -2, message: "别的错误" }) };
+      }
+      throw new Error(`unexpected url ${input.url}`);
+    });
+
+    const result = await studyUnit(
+      { course_id: "1001", term_id: "2001", unit_id: "401", school_short_name: "SJTU", transport: "rpc" },
+      portsWith(async () => SESSION, http),
+    );
+
+    assert.equal(saveAttempts, 1);
+    assert.equal(result.isError, true);
+  });
 });
 
 describe("isLearnProgressBlockedMessage", () => {

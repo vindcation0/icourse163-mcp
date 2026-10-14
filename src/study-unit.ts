@@ -39,6 +39,9 @@ const MAX_PLAYBACK_RATE = 2;
 const DEFAULT_PAGE_INTERVAL_SEC = 1;
 const MIN_PAGE_INTERVAL_SEC = 0;
 const MAX_PAGE_INTERVAL_SEC = 10;
+/** Backoff for the server's 并发限制 throttle on saveMocContentLearn. */
+const SAVE_CONCURRENCY_RETRY_ATTEMPTS = 4;
+const SAVE_CONCURRENCY_RETRY_BASE_MS = 700;
 
 export type StudyUnitStatus =
   | "ok"
@@ -553,6 +556,35 @@ export async function saveLearnDto(input: {
   referer: string;
   dto: unknown;
 }): Promise<SaveLearnOutcome> {
+  // Firing signed saves back to back trips the server's throttle: a 7-unit batch
+  // observed 3 successes and 4 "并发限制，请稍后再试" in 5 seconds. Retry those with
+  // backoff, rebuilding the signature each time because it covers timestamp/nonce.
+  let last: SaveLearnOutcome | null = null;
+  for (let attempt = 1; attempt <= SAVE_CONCURRENCY_RETRY_ATTEMPTS; attempt += 1) {
+    const outcome = await saveLearnOnce(input);
+    if (outcome.kind === "saved" || outcome.kind === "auth_expired") {
+      return outcome;
+    }
+    if (outcome.kind === "page_structure_change" || !/并发限制/.test(outcome.message)) {
+      return outcome;
+    }
+    last = outcome;
+    if (attempt < SAVE_CONCURRENCY_RETRY_ATTEMPTS) {
+      await sleepMs(SAVE_CONCURRENCY_RETRY_BASE_MS * attempt);
+    }
+  }
+  return (
+    last ?? { kind: "error", where: "save_learn", message: "saveMocContentLearn failed" }
+  );
+}
+
+async function saveLearnOnce(input: {
+  http: Icourse163Http;
+  cookie: string;
+  csrfKey: string;
+  referer: string;
+  dto: unknown;
+}): Promise<SaveLearnOutcome> {
   // Signed JSON body. The signature covers these exact bytes, so send them raw.
   const signed = buildSignedRpcRequest({
     dto: input.dto,
@@ -601,7 +633,7 @@ export async function saveLearnDto(input: {
     const apiMessage = asNonEmptyString(saveJson.message) ?? "";
     const detail =
       apiMessage.includes("10006") || String(saveJson.code) === "-10006"
-        ? `${apiMessage} (API anti-abuse; box clock matching Beijing does not clear this — see docs/mcp.md)`
+        ? `${apiMessage} (signature rejected — the site may have rotated the key or digest; see docs/adr/0004-rpc-request-signing.md)`
         : apiMessage;
     return {
       kind: "error",
