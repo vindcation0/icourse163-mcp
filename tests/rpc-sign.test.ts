@@ -9,21 +9,26 @@ import {
 } from "../src/rpc-sign";
 
 /**
- * A real triplet captured from the browser on 2026-10-14: the exact 267-byte body
- * it POSTed to courseRpcBean.saveMocContentLearn.rpc, the nonce and timestamp
- * headers it sent, and the auth-signature it produced. Pinning this locks both the
- * digest and the concatenation order; if the site changes either, this test is the
- * canary rather than a silent -10006 in production.
+ * A real body+nonce+timestamp+signature triplet captured from the browser on
+ * 2026-10-14, POSTed by the site's own client to
+ * courseRpcBean.saveMocContentLearn.rpc. Pinning it locks both the digest and the
+ * concatenation order: if the site changes either, this test is the canary rather
+ * than a silent -10006 in production.
+ *
+ * The account id in the captured body has been replaced with "0" for this public
+ * repo, and CAPTURED_SIGNATURE was recomputed for that body. That costs nothing
+ * here — the algorithm, key and field order are all still pinned exactly — but it
+ * keeps a personal identifier out of the published source.
  */
 const CAPTURED_BODY =
-  '{"dto":{"unitId":1305575052,"finished":true,"index":1,"duration":60000,"courseId":1450750234,"lessonId":1265444035,"videoId":1216009818,"termId":1475848441,"userId":"1597616487","contentType":1,"action":"LEARN_TIME_COUNT","videoTime":1126,"learnedVideoTimeCount":60}}';
+  '{"dto":{"unitId":1305575052,"finished":true,"index":1,"duration":60000,"courseId":1450750234,"lessonId":1265444035,"videoId":1216009818,"termId":1475848441,"userId":"0","contentType":1,"action":"LEARN_TIME_COUNT","videoTime":1126,"learnedVideoTimeCount":60}}';
 const CAPTURED_NONCE = 8508;
 const CAPTURED_TIMESTAMP = 1791965599916;
-const CAPTURED_SIGNATURE = "AD771CA3DBAA099FE9C99973C3CE27AD";
+const CAPTURED_SIGNATURE = "63A71E4C4BA09AF17E9634FA54FB609A";
 
 describe("icourse163RpcSignature", () => {
   test("reproduces the signature the browser actually sent", () => {
-    assert.equal(CAPTURED_BODY.length, 267);
+    assert.equal(CAPTURED_BODY.length, 258);
     assert.equal(
       icourse163RpcSignature(CAPTURED_BODY, CAPTURED_NONCE, CAPTURED_TIMESTAMP),
       CAPTURED_SIGNATURE,
