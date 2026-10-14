@@ -34,8 +34,9 @@ python mooc.py status
 # 刷课（最省事：挑一门课，把没学完的刷完）
 python mooc.py auto
 
-# 如果登录失效了
-npm run login
+# 如果登录失效了（纯 HTTP，约 4 秒，不打开浏览器）
+python mooc.py login
+python mooc.py login --browser      # 需要处理验证码/短信时改用浏览器通道
 ```
 
 验证环境是否还健康：

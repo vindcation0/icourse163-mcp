@@ -3,18 +3,26 @@
 """
 中国大学MOOC 一键刷课 —— 对 icourse163-mcp 的傻瓜封装。
 
-只用 Python 标准库，不需要 pip install 任何东西。
-它通过 stdio 驱动本仓库的 MCP 服务器；只有"登录"走 Node 命令行，
-因为 MCP 按设计不接收密码（密码永远不会经过 AI 或本脚本）。
+只用 Python 标准库，不需要 pip install 任何东西，**登录和刷课都不需要浏览器**。
+它通过 stdio 驱动本仓库的 MCP 服务器；登录走 Node 命令行（MCP 按设计不接收密码，
+密码永远不会经过 AI 或本脚本）。
+
+登录默认走纯 HTTP 通道：复现 URS 组件的请求（SM4 信封 + 工作量证明 + RSA 密码），
+约 4 秒。若站点要求验证码/短信，改用 `login --browser`。
 
 用法：
     python mooc.py                 显示能做什么
-    python mooc.py login           第一次用：输账号密码登录（密码不显示）
+    python mooc.py login           第一次用：输账号密码登录（密码不显示，约 4 秒）
     python mooc.py status          看看登录还有效吗
     python mooc.py courses         列出所有课程
     python mooc.py units <课程ID> <学期ID>
     python mooc.py study <课程ID> <学期ID> [选项]
     python mooc.py auto            最省事：挑一门课，把没学完的刷完
+
+login 的选项：
+    --browser          改用浏览器登录（能处理验证码/短信）
+    --channel phone    登录通道（默认 phone）
+    -u <手机号>         直接指定账号
 
 study / auto 的选项：
     --rate 2           视频播放倍速（0.5~2，默认 2）
@@ -46,6 +54,7 @@ for stream in (sys.stdout, sys.stderr):
 REPO = Path(__file__).resolve().parent
 SERVER_ENTRY = REPO / "src" / "stdio.ts"
 LOGIN_ENTRY = REPO / "src" / "login-cli.ts"
+LOGIN_HTTP_ENTRY = REPO / "src" / "urs-login-cli.ts"
 
 OK = "✅"
 BAD = "❌"
@@ -397,22 +406,59 @@ def study_units(
 # --------------------------------------------------------------------------- #
 
 
-def cmd_login() -> None:
-    if not LOGIN_ENTRY.exists():
-        die(f"找不到 {LOGIN_ENTRY}。请把本脚本放在 icourse163-mcp 仓库根目录下运行。")
-    print("即将打开浏览器登录中国大学MOOC。")
-    print("按提示输入账号，然后输入密码（密码不会显示出来，也不会被保存）。\n")
-    completed = subprocess.call(
-        [find_node(), "--import", "tsx", str(LOGIN_ENTRY)], cwd=str(REPO)
-    )
+def cmd_login(args: argparse.Namespace) -> None:
+    """登录。
+
+    默认走纯 HTTP 通道：约 4 秒，不打开浏览器。它复现了 URS 组件的请求（SM4 信封、
+    工作量证明、RSA 密码），实测可用。失败时**不自动弹浏览器** —— 只告诉你怎么切换。
+
+    --browser 走 Playwright 通道，能处理验证码/短信，但会打开 Chrome 窗口。
+    """
+    if args.browser:
+        if not LOGIN_ENTRY.exists():
+            die(f"找不到 {LOGIN_ENTRY}。请把本脚本放在 icourse163-mcp 仓库根目录下运行。")
+        print("即将打开浏览器登录中国大学MOOC（可处理验证码/短信）。")
+        print("按提示输入账号，然后输入密码（密码不会显示出来，也不会被保存）。\n")
+        completed = subprocess.call(
+            [find_node(), "--import", "tsx", str(LOGIN_ENTRY)], cwd=str(REPO)
+        )
+        print()
+        if completed == 0:
+            print(f"{OK} 登录成功，会话已保存在本机。")
+            print("   下一步：python mooc.py auto")
+        else:
+            print(f"{BAD} 浏览器登录没成功（退出码 {completed}）。")
+            print("   若站点要求短信/扫码验证，可以用浏览器插件复制 cookie 后：")
+            print("   python mooc.py login --browser 并参考 docs/login.md 的 --cookie-file 一节。")
+        return
+
+    if not LOGIN_HTTP_ENTRY.exists():
+        die(f"找不到 {LOGIN_HTTP_ENTRY}。请把本脚本放在 icourse163-mcp 仓库根目录下运行。")
+    print("用纯 HTTP 登录中国大学MOOC —— 不打开浏览器，约 4 秒。")
+    print(f"（账号通道：{args.channel}）\n")
+    command = [
+        find_node(),
+        "--import",
+        "tsx",
+        str(LOGIN_HTTP_ENTRY),
+        "--channel",
+        args.channel,
+    ]
+    if args.username:
+        command += ["-u", args.username]
+    completed = subprocess.call(command, cwd=str(REPO))
     print()
     if completed == 0:
         print(f"{OK} 登录成功，会话已保存在本机。")
-        print("   下一步：python mooc.py auto")
-    else:
-        print(f"{BAD} 登录没成功（退出码 {completed}）。")
-        print("   如果是短信/扫码验证挡住了密码登录，改用浏览器插件复制 cookie 的方式：")
-        print("   python mooc.py login 前先看 docs/login.md 的 --cookie-file 一节。")
+        print("   下一步：python mooc.py status（体检）或 python mooc.py auto（刷课）")
+        return
+    print(f"{BAD} 纯 HTTP 登录没成功（退出码 {completed}）。")
+    print("   常见原因与对策：")
+    print("     · 站点要求滑动验证码 → 纯 HTTP 处理不了，改用浏览器：")
+    print("         python mooc.py login --browser")
+    print("     · 账号被要求短信验证 → 同上")
+    print("     · 提示账号格式错误 → 手机号通道要填 11 位手机号（不是邮箱）")
+    print("   详细原理与已知边界见 docs/adr/0005-urs-http-login.md")
 
 
 def cmd_status() -> None:
@@ -518,14 +564,19 @@ def cmd_auto(args: argparse.Namespace) -> None:
 
 
 USAGE = """\
-中国大学MOOC 一键刷课
+中国大学MOOC 一键刷课 —— 登录和刷课都不需要浏览器
 
-  python mooc.py login            第一次用，先登录（输账号密码，密码不显示）
+  python mooc.py login            第一次用，先登录（输账号密码，密码不显示；约 4 秒）
   python mooc.py auto             最省事：挑一门课，把没学完的视频/文档刷完
   python mooc.py status           看看登录还有效吗
   python mooc.py courses          列出所有课程，拿到 course_id / term_id
   python mooc.py units <课程ID> <学期ID> [--school XDU]
   python mooc.py study <课程ID> <学期ID> [--school XDU] [--unit 单元ID] [--dry-run]
+
+login 还能加：
+  --browser           改用浏览器登录（能处理验证码/短信，会打开 Chrome 窗口）
+  --channel phone     登录通道（默认 phone；icourse163 不提供邮箱登录）
+  -u <手机号>         直接指定账号，不填则交互式询问
 
 study / auto 还能加：
   --rate 2            视频倍速（0.5~2，默认 2）
@@ -558,6 +609,19 @@ def main() -> None:
         help="每个单元之间停顿的秒数（默认 0.6，减少被限流的概率）",
     )
     parser.add_argument("--timeout", type=float, default=300.0)
+    # login options
+    parser.add_argument(
+        "--browser",
+        action="store_true",
+        help="登录时改用浏览器通道（能处理验证码/短信，会打开 Chrome 窗口）",
+    )
+    parser.add_argument(
+        "--channel",
+        default="phone",
+        choices=["phone", "mail"],
+        help="登录通道（默认 phone，即手机号；icourse163 不提供邮箱登录）",
+    )
+    parser.add_argument("--username", "-u", default=None, help="登录账号（手机号），不填则交互式询问")
     args, unknown = parser.parse_known_args()
     if unknown:
         print(f"{WARN} 忽略无法识别的参数：{' '.join(unknown)}")
@@ -567,7 +631,7 @@ def main() -> None:
         return
 
     if args.command == "login":
-        cmd_login()
+        cmd_login(args)
     elif args.command == "status":
         cmd_status()
     elif args.command == "courses":

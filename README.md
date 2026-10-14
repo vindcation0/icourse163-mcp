@@ -16,20 +16,26 @@
 ## 最省事的用法：`mooc.py`
 
 不想碰 MCP、不想抓 cookie、不想记 course_id / term_id？直接用仓库根目录的 `mooc.py`。
-**只需要 Python 3.8+，不需要 `pip install` 任何东西，也不需要 Node 以外的依赖。**
+**只需要 Python 3.8+，不需要 `pip install` 任何东西，也不需要 Node 以外的依赖。
+登录和刷课都不打开浏览器。**
 
 ```bash
-python mooc.py login    # 第一次：输账号密码（密码不显示，不会被保存）
+python mooc.py login    # 第一次：输账号密码（密码不显示，不会被保存；约 4 秒）
 python mooc.py auto     # 之后每次：挑一门课，把没学完的视频/文档刷完
 ```
 
 `auto` 会先检查会话，列出你的课程让你选序号，然后**只刷没完成的单元**，逐个报告结果，
 最后复查一遍完成度。已经完成的单元自动跳过，所以**直接重复运行是安全的**。
 
+登录默认走**纯 HTTP 通道**：在 Node 里复现 URS 组件的请求（SM4 加密信封、一个约 1 秒的
+工作量证明、RSA 加密的密码），实测约 3.5 秒产出可用会话。若站点要求验证码/短信，
+加 `--browser` 改用浏览器通道。
+
 其它命令：
 
 ```bash
 python mooc.py status                              # 登录还有效吗
+python mooc.py login --browser                     # 改用浏览器登录（能处理验证码）
 python mooc.py courses                             # 列出课程，拿 course_id / term_id
 python mooc.py units 1450750234 1475848441 --school XDU
 python mooc.py study 1450750234 1475848441 --school XDU --dry-run   # 只看要刷什么
@@ -37,7 +43,7 @@ python mooc.py study 1450750234 1475848441 --school XDU --delay 2   # 被限流�
 ```
 
 实现上它通过 stdio 驱动本仓库的 MCP 服务器，只有登录走 Node 命令行 —— 所以
-**密码永远不会经过 MCP 或 AI**。刷课默认走签名 RPC 通道，约 1.5 秒一个单元，不启动浏览器。
+**密码永远不会经过 MCP 或 AI**。刷课默认走签名 RPC 通道，约 1.4 秒一个单元。
 测验/讨论类型不会被自动提交，脚本会单独列出来提醒你手动处理。
 
 ## 安装 / 启动
