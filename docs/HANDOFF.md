@@ -4,7 +4,8 @@
 > 第 4 节是已经逆向出来的硬事实，**不要再重新推导一遍**；
 > 第 5 节是踩过的坑，**不要重复犯错**。
 >
-> 最后更新：2026-10-14 · 仓库状态：`7b5ce87`，与 `origin/main` 同步，工作区干净
+> 最后更新：2026-10-14 · 仓库状态：与 `origin/main` 同步，工作区干净
+> （README 已改成"先讲用法、再讲技术"；本文只讲开发交接）
 
 ---
 
@@ -57,9 +58,14 @@ npm run check:rpc --silent -- --course-id 1450750234 --term-id 1475848441 --scho
 | 会话状态体检 | ✅ 可用 | MCP `session_status`，或 `mooc.py status` |
 | 签名 RPC 能力探测 | ✅ 可用 | `npm run check:rpc` |
 | 登录（浏览器） | ✅ 可用 | `npm run login` |
-| 登录（纯 HTTP） | ✅ **可用，无浏览器，~3.6s** | `npm run login:http -- -u <手机号> --channel phone` |
+| 登录（纯 HTTP） | ✅ **可用，无浏览器，~3.6s** | `python mooc.py login`（`npm run login:http -- -u <手机号> --channel phone`） |
+| 登录后操作菜单 | ✅ 可用 | `python mooc.py login` 成功后输入序号 |
+| 会话状态体检 | ✅ 可用 | MCP `session_status`，或 `mooc.py status` |
 | 测验 / 作业答题辅助 | 🟡 工具已存在，**端到端未验证** | MCP `get_homework` / `save_homework_answers` / `submit_homework` |
 | 考试代交 | ❌ 明确不做 | — |
+
+**已知的产品选择**：密码输入**默认可见**（`--hide-password` 可关闭）—— 按使用者要求定的，
+README 里如实标注了代价（回显会留在终端回滚区/录屏里）。
 
 **MCP 工具共 8 个**：`list_todos`、`session_status`、`list_courses`、`list_term_units`、
 `study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`。
