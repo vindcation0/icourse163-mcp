@@ -441,7 +441,7 @@ function firstNumber(...values: unknown[]): number | null {
   return null;
 }
 
-async function fetchLessonUnitLearnVo(input: {
+export async function fetchLessonUnitLearnVo(input: {
   http: Icourse163Http;
   cookie: string;
   csrfKey: string;
@@ -497,13 +497,13 @@ function firstPositivePageCount(record: Record<string, unknown>): number | null 
 }
 
 
-type SaveLearnOutcome =
+export type SaveLearnOutcome =
   | { kind: "saved" }
   | { kind: "auth_expired"; message: string }
   | { kind: "page_structure_change"; message: string }
   | { kind: "error"; message: string; where: string };
 
-async function saveLearnDto(input: {
+export async function saveLearnDto(input: {
   http: Icourse163Http;
   cookie: string;
   csrfKey: string;

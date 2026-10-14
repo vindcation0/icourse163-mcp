@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node --import tsx src/stdio.ts",
     "login": "node --import tsx src/login-cli.ts",
+    "check:rpc": "node --import tsx src/check-rpc.ts",
     "test": "ICOURSE163_DISALLOW_LIVE_PLAYWRIGHT=1 tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
