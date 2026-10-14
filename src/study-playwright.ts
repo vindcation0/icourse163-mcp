@@ -24,6 +24,8 @@ type DomMedia = {
 
 const MEDIA_WAIT_MS = 90_000;
 const NAV_TIMEOUT_MS = 60_000;
+/** How long to wait for the PPT/PDF deck to render enough to count its pages. */
+const PPT_COUNT_WAIT_MS = 30_000;
 const QUIZ_SELECTOR = ".u-questionItem";
 const MEDIA_SELECTOR = "video, audio";
 const PDF_READER_SELECTOR = ".ux-pdf-reader";
@@ -362,7 +364,9 @@ async function navigateToUnitPlayer(
   await waitForCoursewareTree(page);
   await dismissLearnDialogs(page);
 
-  const clicked = await clickUnitInTree(page, input.unitId, input.unitName);
+  // Exact id only: the name fallback must not run before the exact deeplink, or a
+  // same-titled sibling unit can be selected and silently reported as success.
+  const clicked = await clickUnitInTree(page, input.unitId, input.unitName, false);
   await dismissLearnDialogs(page);
 
   if (await waitForMediaOrPdf(page, 15_000)) {
@@ -437,6 +441,7 @@ async function clickUnitInTree(
   page: Page,
   unitId: string,
   unitName: string | null,
+  allowNameFallback = true,
 ): Promise<boolean> {
   await dismissLearnDialogs(page);
 
@@ -453,6 +458,14 @@ async function clickUnitInTree(
       .waitForLoadState("domcontentloaded", { timeout: 5000 })
       .catch(() => undefined);
     return true;
+  }
+
+  // Every video unit in a course is titled 教学视频, so matching by name can select a
+  // different unit and still look successful (media loads, so the caller sees a win
+  // and reports the wrong duration). Callers with an exact lesson/unit id must pass
+  // allowNameFallback: false and use the content-hash deeplink instead.
+  if (!allowNameFallback) {
+    return false;
   }
 
   if (unitName != null && unitName.trim() !== "") {
@@ -655,32 +668,50 @@ async function readPptInPage(
     };
   }
 
-  const pages = await page.evaluate(
-    ({ totalSel, currentSel }) => {
-      const doc = (globalThis as unknown as {
-        document: {
-          querySelector: (s: string) => {
-            childNodes?: { textContent?: string | null }[];
-            textContent?: string | null;
-            value?: string;
-          } | null;
+  const readPageState = (): Promise<{ total: number; start: number }> =>
+    page.evaluate(
+      ({ totalSel, currentSel }) => {
+        const doc = (globalThis as unknown as {
+          document: {
+            querySelector: (s: string) => {
+              childNodes?: { textContent?: string | null }[];
+              textContent?: string | null;
+              value?: string;
+            } | null;
+            querySelectorAll: (s: string) => { length: number };
+          };
+        }).document;
+        const totalNode = doc.querySelector(totalSel);
+        const totalText =
+          totalNode?.childNodes?.[1]?.textContent?.replace(/\s/g, "") ??
+          totalNode?.textContent?.replace(/\D/g, "") ??
+          "0";
+        let total = Number.parseInt(totalText, 10);
+        // Newer viewer builds drop the footer page counter entirely and render one
+        // .slidertable per slide (the next-page control survives as
+        // ..._footer_pages_next). Count slides/page nodes when the footer is gone.
+        if (!Number.isFinite(total) || total <= 0) {
+          const slides = doc.querySelectorAll(".slidertable").length;
+          total = slides > 0 ? slides : doc.querySelectorAll(".ux-h5pdfreader_container .page").length;
+        }
+        const currentEl = doc.querySelector(currentSel);
+        const start = Number.parseInt(currentEl?.value ?? "1", 10);
+        return {
+          total: Number.isFinite(total) ? total : 0,
+          start: Number.isFinite(start) && start > 0 ? start : 1,
         };
-      }).document;
-      const totalNode = doc.querySelector(totalSel);
-      const totalText =
-        totalNode?.childNodes?.[1]?.textContent?.replace(/\s/g, "") ??
-        totalNode?.textContent?.replace(/\D/g, "") ??
-        "0";
-      const total = Number.parseInt(totalText, 10);
-      const currentEl = doc.querySelector(currentSel);
-      const start = Number.parseInt(currentEl?.value ?? "1", 10);
-      return {
-        total: Number.isFinite(total) ? total : 0,
-        start: Number.isFinite(start) && start > 0 ? start : 1,
-      };
-    },
-    { totalSel: PDF_TOTAL_SELECTOR, currentSel: PDF_CURRENT_SELECTOR },
-  );
+      },
+      { totalSel: PDF_TOTAL_SELECTOR, currentSel: PDF_CURRENT_SELECTOR },
+    );
+
+  // The reader element attaches before its slides exist, so the first read legitimately
+  // returns 0 pages. Poll until the deck has actually rendered.
+  let pages = await readPageState();
+  const countDeadline = Date.now() + PPT_COUNT_WAIT_MS;
+  while (pages.total <= 0 && Date.now() < countDeadline) {
+    await sleepMs(500);
+    pages = await readPageState();
+  }
 
   if (pages.total <= 0) {
     return {
