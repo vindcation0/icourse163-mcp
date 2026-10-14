@@ -10,6 +10,9 @@
 
 产品目标尽量对齐 [OCS 中国大学MOOC 脚本](https://github.com/ocsjs/ocsjs/blob/4.0/packages/scripts/src/projects/icourse.ts) 的学习自动化；**明确不做考试代交**。
 
+> 📌 **接手/继续这个仓库请先读 [docs/HANDOFF.md](docs/HANDOFF.md)** —— 现状、已逆向出的硬事实、
+> 踩过的坑（三个会误导人的错误码）、以及未闭合的问题与下一步实验，都在那一份里。
+
 ## 最省事的用法：`mooc.py`
 
 不想碰 MCP、不想抓 cookie、不想记 course_id / term_id？直接用仓库根目录的 `mooc.py`。
