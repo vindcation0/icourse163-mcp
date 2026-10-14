@@ -406,6 +406,51 @@ def study_units(
 # --------------------------------------------------------------------------- #
 
 
+def post_login_menu(args: argparse.Namespace) -> None:
+    """登录成功后的编号菜单：输入序号即执行，0 退出。
+
+    非交互式环境（管道、重定向）不提问，只打印提示后返回，避免 EOFError 崩掉脚本。
+    子命令自己 raise SystemExit 时只结束该项，菜单继续 —— 刚登录完不该因为一次
+    子命令失败就把整个会话丢掉。
+    """
+    if not sys.stdin.isatty():
+        print("   下一步：python mooc.py auto（刷课）或 python mooc.py status（体检）")
+        return
+
+    actions: list[tuple[str, str, object]] = [
+        ("1", "开始刷课（挑一门课，把没学完的刷完）", lambda: cmd_auto(args)),
+        ("2", "看看会话状态", cmd_status),
+        ("3", "列出我的课程", cmd_courses),
+        ("0", "退出", None),
+    ]
+
+    while True:
+        print("\n接下来要做什么？")
+        for key, label, _ in actions:
+            print(f"   {key}. {label}")
+        try:
+            raw = input("\n请输入序号（直接回车=1）：").strip() or "1"
+        except EOFError:
+            # 没有 TTY 也可能走到这里（isatty() 为真但读取即 EOF）。给一行提示再退出，
+            # 免得输出看起来像被截断了。
+            print("   下一步：python mooc.py auto（刷课）或 python mooc.py status（体检）")
+            return
+        match = next((entry for entry in actions if entry[0] == raw), None)
+        if match is None:
+            print(f"   {WARN} 请输入列表里的序号（0-3）。")
+            continue
+        _, label, action = match
+        if action is None:
+            print("   再见。")
+            return
+        print()
+        try:
+            action()  # type: ignore[operator]
+        except SystemExit:
+            # 子命令有自己的退出码语义；在这里只结束这一项，菜单继续。
+            pass
+
+
 def cmd_login(args: argparse.Namespace) -> None:
     """登录。
 
@@ -425,7 +470,7 @@ def cmd_login(args: argparse.Namespace) -> None:
         print()
         if completed == 0:
             print(f"{OK} 登录成功，会话已保存在本机。")
-            print("   下一步：python mooc.py auto")
+            post_login_menu(args)
         else:
             print(f"{BAD} 浏览器登录没成功（退出码 {completed}）。")
             print("   若站点要求短信/扫码验证，可以用浏览器插件复制 cookie 后：")
@@ -450,7 +495,7 @@ def cmd_login(args: argparse.Namespace) -> None:
     print()
     if completed == 0:
         print(f"{OK} 登录成功，会话已保存在本机。")
-        print("   下一步：python mooc.py status（体检）或 python mooc.py auto（刷课）")
+        post_login_menu(args)
         return
     print(f"{BAD} 纯 HTTP 登录没成功（退出码 {completed}）。")
     print("   常见原因与对策：")
@@ -567,6 +612,7 @@ USAGE = """\
 中国大学MOOC 一键刷课 —— 登录和刷课都不需要浏览器
 
   python mooc.py login            第一次用，先登录（输账号密码，密码不显示；约 4 秒）
+                                  ← 登录成功后会列出编号菜单，输入序号即可继续
   python mooc.py auto             最省事：挑一门课，把没学完的视频/文档刷完
   python mooc.py status           看看登录还有效吗
   python mooc.py courses          列出所有课程，拿到 course_id / term_id
