@@ -774,19 +774,35 @@ async function studyDocUnit(input: {
     pageCount = 1;
   }
   if (pageCount == null || pageCount <= 0) {
+    const detail =
+      "Could not resolve doc textPages (getLessonUnitLearnVo failed; page/API structure may have changed)";
+    // The browser path reads the page count from the DOM
+    // (.ux-h5pdfreader_container_footer_pages_total), so it does not need
+    // textPages at all. Without this fallback the doc path dead-ends here and
+    // never gets the chance the video path already has.
+    if (transport === "auto") {
+      return runPlaywrightStudy({
+        base,
+        courseId,
+        termId,
+        unitId,
+        located,
+        course,
+        session,
+        ports,
+        playbackRate,
+        pageIntervalSec,
+        unitType: "doc",
+        priorErrors: [{ where: "learn_vo", message: detail }],
+      });
+    }
     return {
       ...base,
       isError: true,
       status: "page_structure_change",
       unit_type: "doc",
       page_interval_sec: pageIntervalSec,
-      errors: [
-        {
-          where: "learn_vo",
-          message:
-            "Could not resolve doc textPages (page/API structure may have changed)",
-        },
-      ],
+      errors: [{ where: "learn_vo", message: detail }],
     };
   }
 
