@@ -140,18 +140,20 @@ npm run login:http --silent -- -u <手机号> --channel phone   # 密码走隐�
 
 服务端要求验证码时（码为 `441/444/445/447`），CLI 会明确报出，此时请用 `npm run login`。
 
-### 让密码输入可见（可选）
+### 密码输入是否回显
 
-密码提示默认**不回显** —— 可见输入会留在终端回滚区、录屏和截屏里，所以默认是隐藏的。
-但含特殊字符或用输入法时盲打容易出错，这个选择权交给用户：
+**默认可见**（本项目按使用者要求这么定的）：含特殊字符或用输入法时，盲打容易出错。
+
+代价要说清楚：**回显的内容会留在终端回滚区**，也会出现在录屏和截屏里。需要隐藏时：
 
 ```powershell
-python mooc.py login --show-password
-npm run login:http --silent -- --show-password      # 或 ICOURSE163_SHOW_PASSWORD=1
-npm run login --silent -- --show-password          # 浏览器通道同样支持
+python mooc.py login --hide-password              # 也可设 ICOURSE163_HIDE_PASSWORD=1
+npm run login:http --silent -- --hide-password
+npm run login --silent -- --hide-password         # 浏览器通道同样支持
 ```
 
-两种模式的提示文案不同（`密码（不显示）:` / `密码（可见）:`），一眼能看出当前是哪种。
+两种模式的提示文案不同（`密码（可见）:` / `密码（不显示）:`），一眼能看出当前是哪种。
+另有 `ICOURSE163_SHOW_PASSWORD=1` 可强制回显（用于脚本里覆盖全局的 HIDE 设置）。
 
 **`npm run login`（浏览器）仍是可靠回退** —— 它能处理验证码。两者共用同一份凭据存储，
 谁成功都可以直接被 MCP 工具使用。

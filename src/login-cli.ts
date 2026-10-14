@@ -39,8 +39,8 @@ Password login (Playwright; needs Chrome/Chromium):
   env ICOURSE163_USERNAME / ICOURSE163_PASSWORD
   Flags -u/--username and -p/--password override env. Prefer env or a hidden
   prompt; npm may reprint -p unless you pass --silent.
-  --show-password        echo the password while typing (also ICOURSE163_SHOW_PASSWORD=1).
-                         Off by default: visible input stays in the scrollback.
+  --hide-password        do not echo the password (also ICOURSE163_HIDE_PASSWORD=1).
+                         Visible is the default; visible input stays in the scrollback.
   Optional ICOURSE163_CHROME = path to a Chrome/Chromium binary.
 
 Does not implement institutional SSO. Does not scrape answers or auto-submit.
@@ -64,7 +64,7 @@ export type ParsedLoginFlags = {
   help: boolean;
   clear: boolean;
   check: boolean;
-  showPassword: boolean;
+  hidePassword: boolean;
   error: string | null;
 };
 
@@ -88,7 +88,7 @@ export function parseLoginArgv(argv: string[]): ParsedLoginFlags {
         help: { type: "boolean", short: "h", default: false },
         clear: { type: "boolean", default: false },
         check: { type: "boolean", default: false },
-        "show-password": { type: "boolean", default: false },
+        "hide-password": { type: "boolean", default: false },
       },
       allowPositionals: false,
       strict: true,
@@ -100,7 +100,7 @@ export function parseLoginArgv(argv: string[]): ParsedLoginFlags {
       help: values.help === true,
       clear: values.clear === true,
       check: values.check === true,
-      showPassword: values["show-password"] === true,
+      hidePassword: values["hide-password"] === true,
       error: null,
     };
   } catch (error) {
@@ -112,7 +112,7 @@ export function parseLoginArgv(argv: string[]): ParsedLoginFlags {
       help: false,
       clear: false,
       check: false,
-      showPassword: false,
+      hidePassword: false,
       error: message,
     };
   }
@@ -334,7 +334,8 @@ function isNotFound(error: unknown): boolean {
 }
 
 function ttyPrompter(
-  showPassword = false,
+  // Visible by default, matching showPasswordEnabled; callers pass the resolved value.
+  showPassword = true,
 ): Pick<LoginCliIo, "promptUsername" | "promptPassword"> {
   if (process.stdin.isTTY !== true || process.stdout.isTTY !== true) {
     return {};
@@ -352,8 +353,8 @@ function ttyPrompter(
       }
     },
     async promptPassword() {
-      // Hidden unless the caller opts in: visible input stays in the scrollback and in
-      // anything recording the screen.
+      // Visible unless the caller opts out: hidden input is awkward for passwords that are
+      // hard to type blind, but visible input stays in the scrollback and in recordings.
       const label = passwordPromptLabel(showPassword, true);
       if (!showPassword) {
         return readHiddenPassword(label);
@@ -420,8 +421,8 @@ async function main(): Promise<void> {
   const store = createLocalCredentialStore();
   const fetchImpl = globalThis.fetch;
   const flags = parseLoginArgv(process.argv.slice(2));
-  // Opt-in from either the flag or the environment, so wrappers can pass it on.
-  const showPassword = showPasswordEnabled(flags.showPassword, process.env);
+  // Visible by default; --hide-password or ICOURSE163_HIDE_PASSWORD=1 turns it off.
+  const showPassword = showPasswordEnabled(flags.hidePassword, process.env);
   const code = await runLoginCli({
     argv: process.argv.slice(2),
     env: process.env,

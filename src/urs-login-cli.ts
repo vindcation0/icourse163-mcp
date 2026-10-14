@@ -23,7 +23,8 @@ RSA-encrypted password.
 
   -u, --username <account>   phone number or email (else ICOURSE163_USERNAME, else prompt)
       --password <password>  discouraged: visible in the process list; prefer the prompt
-      --show-password        echo the password while typing (also ICOURSE163_SHOW_PASSWORD=1)
+      --hide-password        do not echo the password (also ICOURSE163_HIDE_PASSWORD=1);
+                             visible is the default, so this is the opt-out
       --channel <kind>       phone (default) or mail
 
 The password is read from a hidden prompt unless ICOURSE163_PASSWORD is set, and is
@@ -96,12 +97,13 @@ function readHiddenPassword(prompt: string): Promise<string> {
 }
 
 /**
- * Reads the password. Hidden by default (`readHiddenPassword`), echoing it only when the
- * caller explicitly opts in via `--show-password` / ICOURSE163_SHOW_PASSWORD=1.
+ * Reads the password. Visible by default (`showPasswordEnabled`), echoing only when the
+ * caller opts in via `--show-password` / ICOURSE163_SHOW_PASSWORD=1.
  *
- * Hidden stays the default on purpose: visible input lands in the terminal scrollback,
- * in screen shares and in recordings. But it is a real usability problem for passwords
- * with characters that are hard to type blind, so the choice belongs to the user.
+ * Visible stays the default on purpose here: hidden input is a real usability problem for
+ * passwords with characters that are hard to type blind, and this is a local tool. Hidden
+ * remains available via `--hide-password` / ICOURSE163_HIDE_PASSWORD=1, because visible
+ * input does stay in the scrollback and in screen recordings.
  */
 export function readPassword(prompt: string, visible: boolean): Promise<string> {
   if (!visible) {
@@ -139,13 +141,13 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
   username: string;
   password: string;
   channel: UrsChannel;
-  showPassword: boolean;
+  hidePassword: boolean;
   help: boolean;
 } {
   let username = "";
   let password = "";
   let channel: UrsChannel = 1;
-  let showPassword = false;
+  let hidePassword = false;
   let help = false;
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -154,7 +156,7 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
       return argv[i] ?? "";
     };
     if (arg === "-h" || arg === "--help") help = true;
-    else if (arg === "--show-password") showPassword = true;
+    else if (arg === "--hide-password") hidePassword = true;
     else if (arg === "-u" || arg === "--username") username = next();
     else if (arg.startsWith("--username=")) username = arg.slice(11);
     else if (arg === "-p" || arg === "--password") password = next();
@@ -167,7 +169,7 @@ export function parseUrsLoginArgs(argv: readonly string[]): {
       channel = value === "mail" || value === "email" || value === "0" ? 0 : 1;
     }
   }
-  return { username, password, channel, showPassword, help };
+  return { username, password, channel, hidePassword, help };
 }
 
 export async function runUrsLoginCli(input: {
@@ -247,8 +249,9 @@ export async function runUrsLoginCli(input: {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const flags = parseUrsLoginArgs(argv);
-  // Opt-in from either the flag or the environment, so wrappers (mooc.py) can pass it on.
-  const showPassword = showPasswordEnabled(flags.showPassword, process.env);
+  // Visible by default; --hide-password or ICOURSE163_HIDE_PASSWORD=1 turns it off, and
+  // ICOURSE163_SHOW_PASSWORD=1 forces it back on for a one-off run.
+  const showPassword = showPasswordEnabled(flags.hidePassword, process.env);
   const code = await runUrsLoginCli({
     argv,
     env: process.env,

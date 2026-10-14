@@ -21,6 +21,7 @@
 
 login 的选项：
     --browser          改用浏览器登录（能处理验证码/短信）
+    --hide-password    输入密码时不回显（默认可见）
     --channel phone    登录通道（默认 phone）
     -u <手机号>         直接指定账号
 
@@ -463,11 +464,14 @@ def cmd_login(args: argparse.Namespace) -> None:
         if not LOGIN_ENTRY.exists():
             die(f"找不到 {LOGIN_ENTRY}。请把本脚本放在 icourse163-mcp 仓库根目录下运行。")
         print("即将打开浏览器登录中国大学MOOC（可处理验证码/短信）。")
-        hint = "（密码会显示出来）" if args.show_password else "密码不会显示出来"
-        print(f"按提示输入账号，然后输入密码（{hint}，也不会被保存）。\n")
+        if args.hide_password:
+            print("按提示输入账号，然后输入密码（密码不显示，也不会被保存）。\n")
+        else:
+            print("按提示输入账号，然后输入密码。")
+            print("（密码会显示出来；要隐藏请输入：python mooc.py login --hide-password）\n")
         browser_command = [find_node(), "--import", "tsx", str(LOGIN_ENTRY)]
-        if args.show_password:
-            browser_command.append("--show-password")
+        if args.hide_password:
+            browser_command.append("--hide-password")
         completed = subprocess.call(browser_command, cwd=str(REPO))
         print()
         if completed == 0:
@@ -483,8 +487,10 @@ def cmd_login(args: argparse.Namespace) -> None:
         die(f"找不到 {LOGIN_HTTP_ENTRY}。请把本脚本放在 icourse163-mcp 仓库根目录下运行。")
     print("用纯 HTTP 登录中国大学MOOC —— 不打开浏览器，约 4 秒。")
     print(f"（账号通道：{args.channel}）")
-    if args.show_password:
-        print("（密码会显示出来）")
+    if args.hide_password:
+        print("（密码不显示）")
+    else:
+        print("（密码会显示出来；要隐藏请输入：--hide-password）")
     print()
     command = [
         find_node(),
@@ -496,8 +502,8 @@ def cmd_login(args: argparse.Namespace) -> None:
     ]
     if args.username:
         command += ["-u", args.username]
-    if args.show_password:
-        command.append("--show-password")
+    if args.hide_password:
+        command.append("--hide-password")
     completed = subprocess.call(command, cwd=str(REPO))
     print()
     if completed == 0:
@@ -628,7 +634,7 @@ USAGE = """\
 
 login 还能加：
   --browser           改用浏览器登录（能处理验证码/短信，会打开 Chrome 窗口）
-  --show-password     输入密码时可见（默认隐藏，避免留在终端回滚区/录屏里）
+  --hide-password     输入密码时不回显（默认可见；可见输入会留在终端回滚区/录屏里）
   --channel phone     登录通道（默认 phone；icourse163 不提供邮箱登录）
   -u <手机号>         直接指定账号，不填则交互式询问
 
@@ -677,9 +683,9 @@ def main() -> None:
     )
     parser.add_argument("--username", "-u", default=None, help="登录账号（手机号），不填则交互式询问")
     parser.add_argument(
-        "--show-password",
+        "--hide-password",
         action="store_true",
-        help="输入密码时可见（默认隐藏，避免留在终端回滚区/录屏里）",
+        help="输入密码时不回显（默认可见；可见输入会留在终端回滚区/录屏里）",
     )
     args, unknown = parser.parse_known_args()
     if unknown:

@@ -33,22 +33,32 @@ export const PASSWORD_MODE_SWITCH_LABEL = /密码登录|账号登录|邮箱登�
 /**
  * Whether the password prompt should echo what is typed.
  *
- * Hidden stays the default because visible input lands in the terminal scrollback and in
- * anything recording the screen, but the choice belongs to the user: a password with
- * characters that are awkward to type blind is a real usability problem. Opt in with
- * `--show-password` or ICOURSE163_SHOW_PASSWORD=1.
+ * Visible is the default here, chosen deliberately: hidden input is hard to get right
+ * with special characters or an IME, and this is a local tool on the user's own machine.
+ * The tradeoff is real though — visible input stays in the terminal scrollback and in
+ * anything recording or screenshotting the screen — so hiding stays one flag away:
+ * `--hide-password` or ICOURSE163_HIDE_PASSWORD=1.
+ *
+ * ICOURSE163_SHOW_PASSWORD=1 still forces visible, so a wrapper that sets HIDE globally
+ * can be overridden per run.
  */
 export function showPasswordEnabled(
-  flag: boolean,
+  hideFlag: boolean,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return flag || env.ICOURSE163_SHOW_PASSWORD === "1";
+  if (env.ICOURSE163_SHOW_PASSWORD === "1") {
+    return true;
+  }
+  if (hideFlag || env.ICOURSE163_HIDE_PASSWORD === "1") {
+    return false;
+  }
+  return true;
 }
 
 /** The prompt states which mode is active, so the two are distinguishable on screen. */
 export function passwordPromptLabel(visible: boolean, english = false): string {
   if (english) {
-    return visible ? "Password (visible): " : "Password: ";
+    return visible ? "Password (visible): " : "Password (hidden): ";
   }
   return visible ? "密码（可见）: " : "密码（不显示）: ";
 }

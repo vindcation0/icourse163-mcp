@@ -108,21 +108,35 @@ describe("redactLoginSecrets", () => {
 });
 
 describe("showPasswordEnabled / passwordPromptLabel", () => {
-  // Hidden is the default on purpose; visible is an explicit opt-in.
-  test("is off unless the flag or the environment asks for it", () => {
-    assert.equal(showPasswordEnabled(false, {}), false);
-    assert.equal(showPasswordEnabled(false, { ICOURSE163_SHOW_PASSWORD: "0" }), false);
-    assert.equal(showPasswordEnabled(true, {}), true);
-    assert.equal(showPasswordEnabled(false, { ICOURSE163_SHOW_PASSWORD: "1" }), true);
-    assert.equal(showPasswordEnabled(true, { ICOURSE163_SHOW_PASSWORD: "0" }), true);
+  // Visible is the deliberate default; hiding is the opt-out.
+  test("defaults to visible and can be turned off", () => {
+    assert.equal(showPasswordEnabled(false, {}), true);
+    assert.equal(showPasswordEnabled(true, {}), false);
+    assert.equal(showPasswordEnabled(false, { ICOURSE163_HIDE_PASSWORD: "1" }), false);
+    // anything other than the exact "1" leaves the default alone
+    assert.equal(showPasswordEnabled(false, { ICOURSE163_HIDE_PASSWORD: "0" }), true);
+  });
+
+  test("an explicit ICOURSE163_SHOW_PASSWORD=1 overrides a global hide", () => {
+    assert.equal(
+      showPasswordEnabled(true, { ICOURSE163_SHOW_PASSWORD: "1" }),
+      true,
+    );
+    assert.equal(
+      showPasswordEnabled(false, {
+        ICOURSE163_SHOW_PASSWORD: "1",
+        ICOURSE163_HIDE_PASSWORD: "1",
+      }),
+      true,
+    );
   });
 
   test("labels the two modes differently so the user can tell which is active", () => {
-    assert.match(passwordPromptLabel(false), /不显示/);
     assert.match(passwordPromptLabel(true), /可见/);
-    assert.notEqual(passwordPromptLabel(false), passwordPromptLabel(true));
+    assert.match(passwordPromptLabel(false), /不显示/);
+    assert.notEqual(passwordPromptLabel(true), passwordPromptLabel(false));
     assert.equal(passwordPromptLabel(true, true), "Password (visible): ");
-    assert.equal(passwordPromptLabel(false, true), "Password: ");
+    assert.equal(passwordPromptLabel(false, true), "Password (hidden): ");
   });
 });
 
