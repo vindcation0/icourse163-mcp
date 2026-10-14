@@ -117,3 +117,22 @@ npm run login --silent
 3. 登录后用 `npm run check:rpc --silent -- --course-id <id> --term-id <id> --school <S>` 验证：
    它会同时确认会话可用与签名请求可用（约 2 秒）
 
+### 纯 HTTP 登录（实验性，不需要浏览器）
+
+`npm run login:http` 在 Node 里复现 URS 组件的请求，全程不起浏览器：SM4 加密的参数信封、
+一个必须实打实烧掉约 1 秒 CPU 的工作量证明（VDF + MurmurHash3）、以及 RSA 加密的密码。
+原理、证据与边界见 [docs/adr/0005-urs-http-login.md](adr/0005-urs-http-login.md)。
+
+```powershell
+npm run login:http --silent -- -u <手机号或邮箱> --channel mail   # 密码走隐藏输入
+```
+
+**它可能失败，而且是设计上就会失败**：站点对可疑会话会要求**滑动验证码**，那时服务端回
+`401` + `dt:"02"`，CLI 会明确提示你改用 `npm run login`。这是自适应风控，不是请求构造错误 ——
+而且因为我没有（也不应有）真实账号来验证，**触发条件未知**：可能只是"账号不存在"的防枚举
+行为，也可能是缺少易盾设备指纹。
+
+**所以 `npm run login`（浏览器）仍是默认路径，`login:http` 是快路径。** 两者共用同一份凭据
+存储，谁成功都可以直接被 MCP 工具使用。
+
+
