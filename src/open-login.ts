@@ -10,7 +10,7 @@ import {
   type Page,
 } from "playwright-core";
 
-import { cookieHasNtesstudysi } from "./cookie";
+import { cookieHasNtesstudysi, cookieHasStudyInfo } from "./cookie";
 import type { WritableCredentialStore } from "./credentials";
 
 export type PasswordCredentials = {
@@ -59,6 +59,9 @@ export function passwordLoginHeadless(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
+  if (env.ICOURSE163_LOGIN_HEADLESS === "1") {
+    return true;
+  }
   return cannotOpenLoginUiMessage(env, platform) != null;
 }
 
@@ -259,16 +262,31 @@ async function clickLoginTrigger(page: Page): Promise<void> {
 
 async function ensurePasswordMode(frame: FrameLocator): Promise<void> {
   const visiblePassword = frame.locator("input[type='password']").filter({ visible: true }).first();
-  if (await visiblePassword.isVisible()) {
+  if (await visiblePassword.isVisible().catch(() => false)) {
     return;
   }
+  // The live UI labels its SMS tab 短信快捷登录, i.e. the opposite direction from the
+  // password labels below, so there is nothing here to switch *to*. Try anyway in
+  // case a password tab exists, then report precisely rather than letting the
+  // caller wait out the 60s session timeout for a login that cannot happen.
   const modeSwitch = frame.getByText(PASSWORD_MODE_SWITCH_LABEL).filter({ visible: true }).first();
-  try {
-    await modeSwitch.waitFor({ state: "visible", timeout: LOGIN_UI_TIMEOUT_MS });
-    await modeSwitch.click();
-  } catch {
-    // Already on password mode, or the tab is absent; fill still waits for the field.
+  await modeSwitch.click({ timeout: LOGIN_UI_TIMEOUT_MS }).catch(() => undefined);
+  if (await visiblePassword.isVisible().catch(() => false)) {
+    return;
   }
+  const labels = await frame
+    .locator("a.tab1, .tab1, [class*='tab']")
+    .allInnerTexts()
+    .catch(() => [] as string[]);
+  const seen = labels
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter((text) => text.length > 0)
+    .slice(0, 5);
+  throw new Error(
+    `password login: the login frame has no visible password field and no switchable password tab` +
+      `${seen.length > 0 ? ` (visible tabs: ${seen.join(" / ")})` : ""}. ` +
+      "The site is most likely in SMS or QR mode; use --cookie-file / ICOURSE163_COOKIE instead.",
+  );
 }
 
 async function waitForSessionCookie(
@@ -283,10 +301,15 @@ async function waitForSessionCookie(
     }
     await sleep(POLL_INTERVAL_MS);
   }
-  throw new Error("login wait timeout");
+  throw new Error(
+    "login wait timeout: no authenticated session appeared. The site writes a " +
+      "placeholder NTESSTUDYSI for anonymous visitors, so a real login must also " +
+      "produce STUDY_INFO. Check the account and password; if the site asks for SMS " +
+      "or QR verification, use --cookie-file / ICOURSE163_COOKIE instead.",
+  );
 }
 
-function cookieHeaderFrom(cookies: Cookie[]): string | null {
+export function cookieHeaderFrom(cookies: Cookie[]): string | null {
   const hostCookies = cookies.filter((cookie) =>
     /(^|\.)icourse163\.org$/i.test(cookie.domain),
   );
@@ -294,7 +317,15 @@ function cookieHeaderFrom(cookies: Cookie[]): string | null {
     return null;
   }
   const header = hostCookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  return cookieHasNtesstudysi(header) ? header : null;
+  // NTESSTUDYSI alone is NOT proof of a login. The site's own JS writes a
+  // hard-coded fallback value for anonymous visitors:
+  //
+  //   if (!r.NTESSTUDYSI) document.cookie = "NTESSTUDYSI=" + y + ";path=/"
+  //   // y = "fa2c35db81bb400a97f5ed9465e22b9d"
+  //
+  // so accepting it made a bogus account report LOGIN_OK and overwrite a valid
+  // stored session. STUDY_INFO is only set by a real URS login.
+  return cookieHasNtesstudysi(header) && cookieHasStudyInfo(header) ? header : null;
 }
 
 function sleep(milliseconds: number): Promise<void> {

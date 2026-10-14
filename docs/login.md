@@ -62,3 +62,58 @@ npm run login -- --help
 ## 和 MCP 的关系
 
 先 CLI 登录，再挂 MCP。`list_todos` 用本机会话拉仍开放的待办；工具参数里没有账号、密码或 cookie，返回里也不含它们。
+
+## 实测补充（本机验证，2026-10-14）
+
+### 密码登录的现状
+
+`npm run login` 不带 `--cookie-file` 时走 Playwright 账密流程：打开首页 → 点「登录」→ 进入
+`reg.icourse163.org` 的登录 iframe → 填账号密码 → 点 `a.u-loginbtn`。
+
+扫描当前登录界面得到的实际结构：
+
+```
+iframe                     iframe[src*='reg.icourse163.org'][src*='index_dl2']  ✓ 匹配
+input[type='text']         total=1 visible=0    （隐藏）
+input[type='tel']          total=1 visible=1    ← 账号输入框
+input[type='password']     total=2 visible=1    ← 密码框默认可见
+a.u-loginbtn               total=1 visible=1    ← 提交按钮 ✓ 匹配
+界面文字：短信快捷登录 / 登 录 / 十天内免登录 / 忘记密码？
+```
+
+密码框默认可见，所以 `ensurePasswordMode()` 第一次检查即通过、提前返回，选择器链是通的。
+但要注意：界面上的切换标签是 **`短信快捷登录`**，方向是"切到短信"，与
+`PASSWORD_MODE_SWITCH_LABEL`（`密码登录|账号登录|邮箱登录`）相反。若站点某次默认进入短信/扫码
+模式，现在会**立即报错并列出可见标签**，而不是让你等 60 秒的会话超时。
+
+### ⚠️ `NTESSTUDYSI` 存在 ≠ 已登录
+
+站点自己的 JS 会给**未登录访客**写入一个硬编码占位值：
+
+```js
+if (!r.NTESSTUDYSI) document.cookie = "NTESSTUDYSI=".concat(y, ";path=/")
+// y = "fa2c35db81bb400a97f5ed9465e22b9d"
+```
+
+因此只检查 `NTESSTUDYSI` 会导致：**账号密码随便填也能打印 `LOGIN_OK`，并把那个匿名会话覆盖
+掉你原本有效的会话。** 本仓已修正 —— 现在要求同时存在 `STUDY_INFO`（只有真实 URS 登录才会写），
+并用测试锁住（`tests/open-login.test.ts` → `cookieHeaderFrom`）。
+
+登录失败时**不会**写入任何会话，已有会话保持不变。
+
+### 无界面登录
+
+Windows/macOS 下账密登录默认弹出可见浏览器窗口。想无窗口运行（或做自动化验证）：
+
+```powershell
+$env:ICOURSE163_LOGIN_HEADLESS='1'   # 强制 headless
+npm run login --silent
+```
+
+### 建议的登录顺序
+
+1. `npm run login`（交互式账密，密码隐藏输入）—— 最省事
+2. 若站点要求短信/扫码验证，会在 iframe 里体现；此时改用 `--cookie-file`
+3. 登录后用 `npm run check:rpc --silent -- --course-id <id> --term-id <id> --school <S>` 验证：
+   它会同时确认会话可用与签名请求可用（约 2 秒）
+

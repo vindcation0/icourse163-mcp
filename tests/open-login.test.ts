@@ -4,11 +4,56 @@ import { describe, test } from "node:test";
 import {
   PASSWORD_MODE_SWITCH_LABEL,
   cannotOpenLoginUiMessage,
+  cookieHeaderFrom,
   describeLoginFailure,
   isPasswordSubmitLabel,
   passwordLoginHeadless,
   redactLoginSecrets,
 } from "../src/open-login";
+import type { Cookie } from "playwright-core";
+
+function cookie(name: string, value: string, domain = ".icourse163.org"): Cookie {
+  return {
+    name,
+    value,
+    domain,
+    path: "/",
+    expires: -1,
+    httpOnly: false,
+    secure: true,
+    sameSite: "Lax",
+  };
+}
+
+describe("cookieHeaderFrom", () => {
+  // The site's own JS sets this exact value for anonymous visitors, so a bogus
+  // account used to report LOGIN_OK and overwrite the stored session.
+  test("rejects the anonymous placeholder NTESSTUDYSI", () => {
+    assert.equal(cookieHeaderFrom([cookie("NTESSTUDYSI", "fa2c35db81bb400a97f5ed9465e22b9d")]), null);
+  });
+
+  test("rejects a session without STUDY_INFO", () => {
+    assert.equal(cookieHeaderFrom([cookie("NTESSTUDYSI", "abc"), cookie("EDUWEBDEVICE", "d")]), null);
+  });
+
+  test("accepts a real session (NTESSTUDYSI + STUDY_INFO)", () => {
+    const header = cookieHeaderFrom([cookie("NTESSTUDYSI", "abc"), cookie("STUDY_INFO", "x")]);
+    assert.match(header ?? "", /NTESSTUDYSI=abc/);
+    assert.match(header ?? "", /STUDY_INFO=x/);
+  });
+
+  test("ignores cookies from other hosts", () => {
+    assert.equal(
+      cookieHeaderFrom([cookie("NTESSTUDYSI", "abc", "example.com"), cookie("STUDY_INFO", "x", "example.com")]),
+      null,
+    );
+    // one foreign cookie must not mask a real session on ours
+    assert.match(
+      cookieHeaderFrom([cookie("NTESSTUDYSI", "abc", "example.com"), cookie("NTESSTUDYSI", "abc"), cookie("STUDY_INFO", "x")]) ?? "",
+      /STUDY_INFO=x/,
+    );
+  });
+});
 
 describe("describeLoginFailure", () => {
   test("explains a missing Chrome channel", () => {
