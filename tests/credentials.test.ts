@@ -57,6 +57,50 @@ describe("cookie helpers", () => {
     assert.equal(ntesstudysiFromCookie(merged), "test-session");
     assert.doesNotMatch(merged, /evil=/);
   });
+
+  // icourse163 answers HTML pages with a logout redirect whose Set-Cookie clears
+  // the session using a quoted empty value plus an epoch Expires. Treating `""`
+  // as a real value made a dead session look alive and poisoned the csrfKey.
+  test("deletes a cookie cleared by an expired Expires and quoted empty value", () => {
+    const merged = mergeSetCookies(`${SESSION}; STUDY_INFO=test-study-info`, [
+      'NTESSTUDYSI=""; Domain=icourse163.org; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/',
+    ]);
+    assert.equal(cookieHasNtesstudysi(merged), false);
+    assert.equal(ntesstudysiFromCookie(merged), null);
+    assert.equal(cookieHasStudyInfo(merged), true);
+    assert.doesNotMatch(merged, /%22|""/);
+  });
+
+  test("deletes a cookie cleared with an unquoted empty value", () => {
+    const merged = mergeSetCookies(WITH_INFO, [
+      "STUDY_INFO=; Domain=.icourse163.org; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/",
+    ]);
+    assert.equal(cookieHasStudyInfo(merged), false);
+    assert.equal(ntesstudysiFromCookie(merged), "test-session");
+  });
+
+  test("deletes a cookie cleared by Max-Age=0", () => {
+    const merged = mergeSetCookies(WITH_INFO, [
+      "STUDY_INFO=x; Domain=.icourse163.org; Max-Age=0; Path=/",
+    ]);
+    assert.equal(cookieHasStudyInfo(merged), false);
+  });
+
+  test("strips surrounding quotes from a live cookie value", () => {
+    const merged = mergeSetCookies(SESSION, [
+      'STUDY_INFO="live-value"; Domain=.icourse163.org; Path=/',
+    ]);
+    assert.equal(merged.includes('STUDY_INFO="live-value"'), false);
+    assert.match(merged, /STUDY_INFO=live-value(?:;|$)/);
+    assert.equal(cookieHasStudyInfo(merged), true);
+  });
+
+  test("keeps a cookie whose Expires is in the future", () => {
+    const merged = mergeSetCookies(SESSION, [
+      "STUDY_INFO=live; Domain=.icourse163.org; Expires=Thu, 01-Jan-2099 00:00:10 GMT; Path=/",
+    ]);
+    assert.equal(cookieHasStudyInfo(merged), true);
+  });
 });
 
 describe("file credential store", () => {

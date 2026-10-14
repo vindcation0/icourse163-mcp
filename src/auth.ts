@@ -76,11 +76,17 @@ export async function probeSession(input: {
     return expiredSessionFailure(`${EXPIRED_SESSION_MESSAGE} Warm-up failed: ${detail}`);
   }
 
-  if (warmed.statusCode >= 200 && warmed.statusCode < 400 && cookieHasStudyInfo(warmed.cookie)) {
-    return { ok: true, cookie: warmed.cookie };
+  // Warm-up is meant to refresh cookies, but an HTML page can also answer with a
+  // logout redirect whose Set-Cookie clears the session. Never let the warm-up
+  // strip NTESSTUDYSI from a session that had one — keep whichever candidate
+  // still carries the token.
+  const warmedCookie = cookieHasNtesstudysi(warmed.cookie) ? warmed.cookie : cookie;
+
+  if (warmed.statusCode >= 200 && warmed.statusCode < 400 && cookieHasStudyInfo(warmedCookie)) {
+    return { ok: true, cookie: warmedCookie };
   }
 
-  const csrfKey = ntesstudysiFromCookie(warmed.cookie) ?? ntesstudysiFromCookie(cookie);
+  const csrfKey = ntesstudysiFromCookie(warmedCookie) ?? ntesstudysiFromCookie(cookie);
   if (csrfKey == null) {
     return expiredSessionFailure();
   }
@@ -89,7 +95,7 @@ export async function probeSession(input: {
   try {
     rpc = await request({
       url: `${COURSE_LIST_RPC_URL}?csrfKey=${encodeURIComponent(csrfKey)}`,
-      cookie: warmed.cookie,
+      cookie: warmedCookie,
       method: "POST",
       form: {
         type: "30",
@@ -108,7 +114,8 @@ export async function probeSession(input: {
   }
 
   if (rpcCodeIsZero(rpc.body) && rpc.statusCode >= 200 && rpc.statusCode < 300) {
-    return { ok: true, cookie: rpc.cookie.length > 0 ? rpc.cookie : warmed.cookie };
+    const resultCookie = cookieHasNtesstudysi(rpc.cookie) ? rpc.cookie : warmedCookie;
+    return { ok: true, cookie: resultCookie };
   }
 
   return expiredSessionFailure();

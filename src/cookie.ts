@@ -75,7 +75,7 @@ export function mergeSetCookies(cookie: string, setCookies: string[]): string {
       continue;
     }
     const name = first.slice(0, eq).trim();
-    const value = first.slice(eq + 1);
+    const value = unquoteCookieValue(first.slice(eq + 1));
     if (name.length === 0) {
       continue;
     }
@@ -83,13 +83,43 @@ export function mergeSetCookies(cookie: string, setCookies: string[]): string {
     if (domain != null && !isIcourse163Domain(domain)) {
       continue;
     }
-    if (/(?:^|;\s*)max-age=0\b/i.test(raw)) {
+    // A cookie is cleared by Max-Age=0, by an already-expired Expires (icourse163
+    // sends "Thu, 01-Jan-1970 ... GMT" on logout), or by a quoted empty value.
+    // All three must delete it: storing the literal `""` would keep
+    // ntesstudysiFromCookie() truthy and let a cleared session look alive.
+    if (setCookieClearsValue(raw) || value === "") {
       jar.delete(name);
       continue;
     }
     jar.set(name, value);
   }
   return serializeCookieHeader(jar);
+}
+
+/** Strips one layer of surrounding quotes so `"abc"` and `""` compare as expected. */
+function unquoteCookieValue(value: string): string {
+  if (value.length < 2) {
+    return value;
+  }
+  const first = value[0];
+  const last = value[value.length - 1];
+  if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+    return value.slice(1, -1);
+  }
+  return value;
+}
+
+/** True when this Set-Cookie header clears the cookie instead of setting it. */
+function setCookieClearsValue(raw: string): boolean {
+  if (/(?:^|;\s*)max-age=0\b/i.test(raw)) {
+    return true;
+  }
+  const expires = cookieAttribute(raw, "expires");
+  if (expires == null) {
+    return false;
+  }
+  const when = Date.parse(expires);
+  return Number.isFinite(when) && when <= Date.now();
 }
 
 function looksLikeNetscape(text: string): boolean {

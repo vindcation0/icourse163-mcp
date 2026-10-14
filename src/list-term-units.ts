@@ -158,6 +158,7 @@ export async function listTermUnits(
     school_short_name: (args.school_short_name ?? "").trim(),
   };
 
+  const diagnostics: string[] = [];
   let moc: Record<string, unknown> | null;
   try {
     moc = await fetchMocTermDto({
@@ -165,6 +166,7 @@ export async function listTermUnits(
       cookie: session.cookie,
       csrfKey: session.csrfKey,
       course,
+      diagnostics,
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -177,6 +179,7 @@ export async function listTermUnits(
   }
 
   if (moc == null) {
+    const detail = diagnostics.length > 0 ? `: ${diagnostics.join("; ")}` : "";
     return {
       isError: true,
       status: "error",
@@ -184,7 +187,7 @@ export async function listTermUnits(
       errors: [
         {
           where: "term",
-          message: "Term structure RPC returned no mocTermDto",
+          message: `Term structure RPC returned no mocTermDto${detail}`,
         },
       ],
     };
