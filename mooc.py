@@ -245,11 +245,23 @@ def pick_course(mcp: Mcp, keyword: str | None, term: str | None) -> tuple[str, s
         )
         return chosen["id"], chosen["term_id"], chosen["school"]
 
+    if not sys.stdin.isatty():
+        listing = "、".join(f"{c['name']}({c['term_id']})" for c in courses)
+        die(
+            "有多门课程，但当前不是交互式终端，没法让你选序号。\n"
+            f"   可选：{listing}\n"
+            "   请改用：python mooc.py study <course_id> <term_id> --school <学校简称>\n"
+            "   或：  python mooc.py auto --course <课程名关键词> --term <学期ID>"
+        )
+
     print("\n   你有这些课程：")
     for index, course in enumerate(courses, start=1):
         print(f"     {index:>2}. {course['name']}（{course['school']}）学期 {course['term_id']}")
     while True:
-        raw = input("\n   请输入序号（直接回车=1）：").strip() or "1"
+        try:
+            raw = input("\n   请输入序号（直接回车=1）：").strip() or "1"
+        except EOFError:
+            die("没有收到输入。请改用 --course / --term 指定课程。")
         if raw.isdigit() and 1 <= int(raw) <= len(courses):
             chosen = courses[int(raw) - 1]
             return chosen["id"], chosen["term_id"], chosen["school"]
