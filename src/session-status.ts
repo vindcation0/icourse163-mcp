@@ -42,8 +42,17 @@ export type SessionStatusResult = {
   /** Result of an authenticated read (the course panel RPC). */
   api: SessionStatusValue;
   course_count: number;
-  /** True when both web-session markers are present, i.e. the browser path has a chance. */
-  browser_path_ready: boolean;
+  /**
+   * Both `STUDY_INFO` and `STUDY_SESS` cookies are present.
+   *
+   * Deliberately NOT named "browser path ready": that was an overclaim, and it was measured
+   * wrong. Both markers can be present while /learn/ still bounces to the logout endpoint,
+   * and a logged-in Chrome profile opens /learn/ while carrying neither STUDY_SESS nor
+   * NTESSTUDYSI. So this is a marker check, not proof. Probing /learn/ directly would be
+   * the real check, but it hits the logout endpoint and can invalidate a working session,
+   * so it is not done here.
+   */
+  web_session_markers: boolean;
   guidance: string;
   errors: ToolError[];
 };
@@ -63,7 +72,7 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
       cookies: { ntesstudysi: false, study_info: false, study_sess: false, total: 0 },
       api: "auth_expired",
       course_count: 0,
-      browser_path_ready: false,
+      web_session_markers: false,
       guidance: NO_SESSION_GUIDANCE,
       errors: [{ where: "credentials", message: missingSessionFailure().message }],
     };
@@ -84,7 +93,7 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
     study_sess: (jar.get("STUDY_SESS") ?? "").trim().length > 0,
     total: jar.size,
   };
-  const browserPathReady = cookies.study_info && cookies.study_sess;
+  const webSessionMarkers = cookies.study_info && cookies.study_sess;
 
   const session = await resolveSession(ports);
   if (!session.ok) {
@@ -95,7 +104,7 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
       cookies,
       api: session.status,
       course_count: 0,
-      browser_path_ready: browserPathReady,
+      web_session_markers: webSessionMarkers,
       guidance:
         readError != null
           ? `Could not read the stored session: ${readError}`
@@ -119,16 +128,19 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
       cookies,
       api: panels.status,
       course_count: 0,
-      browser_path_ready: browserPathReady,
+      web_session_markers: webSessionMarkers,
       guidance: panels.status === "auth_expired" ? EXPIRED_GUIDANCE : "The course panel RPC failed; retry, or re-run `npm run login`.",
       errors: panels.errors,
     };
   }
 
   const courseCount = panels.courses.length;
-  const guidance = browserPathReady
-    ? `Session is usable (${courseCount} course/term entries). Prefer transport=rpc: it is signed HTTP, about a second per unit, and needs no browser. transport=playwright is also available because the web session is present.`
-    : `Session is usable for API calls (${courseCount} course/term entries), so transport=rpc works. The stored cookie has a valid API token but no live web session (STUDY_SESS/STUDY_INFO missing), so the Playwright path would be bounced off /learn/ — re-run \`npm run login\` before using transport=playwright.`;
+  // Both branches point at transport=rpc, because the browser path cannot be promised from
+  // cookies alone. Measured: both markers present yet /learn/ bounced to logout, while a
+  // pure-HTTP login still drove the signed RPC fine.
+  const guidance = webSessionMarkers
+    ? `Session is usable (${courseCount} course/term entries). Prefer transport=rpc: signed HTTP, about a second per unit, no browser needed. The web-session markers are present, but that does NOT prove the Playwright path works — both markers have been seen present while /learn/ still bounced to the logout endpoint. Use \`npm run login\` (browser) if you need transport=playwright.`
+    : `Session is usable for API calls (${courseCount} course/term entries), so transport=rpc works. STUDY_SESS/STUDY_INFO are missing, so the Playwright path is very unlikely to work — use \`npm run login\` (browser) if you need it.`;
 
   return {
     isError: false,
@@ -137,7 +149,7 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
     cookies,
     api: "ok",
     course_count: courseCount,
-    browser_path_ready: browserPathReady,
+    web_session_markers: webSessionMarkers,
     guidance,
     errors: [],
   };

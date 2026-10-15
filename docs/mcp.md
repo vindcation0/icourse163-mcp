@@ -125,7 +125,12 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 ## `session_status`
 
 - 报告本机会话能否使用、以及哪些 transport 可用。**只读**：不写进度，也不请求 `/learn/`（那可能触发登出，反而弄坏一个正常的会话）。
-- 返回：`stored`（本地有会话）、`cookies`（`ntesstudysi` / `study_info` / `study_sess` 是否存在，以及 cookie 总数）、`api`（一次鉴权读取的结果）、`course_count`、`browser_path_ready`、`guidance`。
+- 返回：`stored`（本地有会话）、`cookies`（`ntesstudysi` / `study_info` / `study_sess` 是否存在，以及 cookie 总数）、`api`（一次鉴权读取的结果）、`course_count`、`web_session_markers`、`guidance`。
+- **`web_session_markers` 只表示两个网页会话 cookie 是否存在，不代表浏览器路径真的能用。** 实测反例：
+  - 两个标记**都在**，`/learn/` 仍被 302 到 `/passport/member/logout.htm`（纯 HTTP 登录得到的会话就是这种）
+  - 登录流程的持久化 Chrome profile **两个标记都没有**（无 `STUDY_SESS`、无 `NTESSTUDYSI`），却能正常打开 `/learn/`
+  
+  所以这个字段**刻意不叫** `browser_path_ready`。真正的探测方式是请求 `/learn/`，但那会命中登出接口、可能反过来弄坏可用会话，因此没有采用。
 - 关键区分（这是本项目最容易误判的状态）：
   - 只有 `NTESSTUDYSI` → **API 调用与签名 RPC 路径可用**，但 Playwright 路径不可用。因为网页会话缺失时，普通 HTML 请求会被弹离 `/learn/`，于是 `list_courses` 一切正常而 `study_unit` 报「找不到视频元素」。
   - `STUDY_INFO` + `STUDY_SESS` 齐全 → 两条路径都可用。

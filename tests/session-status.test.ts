@@ -69,7 +69,7 @@ describe("sessionStatus", () => {
     assert.match(result.guidance, /npm run login/);
   });
 
-  test("a full session reports both transports ready", async () => {
+  test("a full session reports a usable API and present web markers", async () => {
     const { http } = happyHttp(coursePanelBody([MOOC_COURSE]));
     const result = await sessionStatus(portsWith(async () => FULL_SESSION, http));
     assert.equal(result.isError, false);
@@ -81,15 +81,18 @@ describe("sessionStatus", () => {
       study_sess: true,
       total: 3,
     });
-    assert.equal(result.browser_path_ready, true);
+    assert.equal(result.web_session_markers, true);
     assert.equal(result.course_count, 1);
     assert.match(result.guidance, /transport=rpc/);
-    assert.match(result.guidance, /web session is present/);
+    // Markers present must NOT be phrased as "the browser path works". That was measured
+    // wrong: both markers were present while /learn/ still bounced to the logout endpoint.
+    assert.match(result.guidance, /does NOT prove the Playwright path/);
+    assert.doesNotMatch(result.guidance, /playwright is also available/i);
   });
 
   // This is the state that cost hours: reads work, so list_courses succeeds, while the
   // browser path is bounced off /learn/ and study_unit fails with a misleading error.
-  test("an API-only session is usable but flags the browser path as unavailable", async () => {
+  test("an API-only session is usable but does not promise the browser path", async () => {
     const { http } = happyHttp(coursePanelBody([MOOC_COURSE]));
     const result = await sessionStatus(portsWith(async () => API_ONLY_SESSION, http));
     assert.equal(result.isError, false);
@@ -97,9 +100,9 @@ describe("sessionStatus", () => {
     assert.equal(result.api, "ok");
     assert.equal(result.cookies.ntesstudysi, true);
     assert.equal(result.cookies.study_sess, false);
-    assert.equal(result.browser_path_ready, false);
+    assert.equal(result.web_session_markers, false);
     assert.match(result.guidance, /transport=rpc works/);
-    assert.match(result.guidance, /bounced off \/learn\//);
+    assert.match(result.guidance, /very unlikely to work/);
   });
 
   test("an empty course panel is ok with zero courses, not an error", async () => {

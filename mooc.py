@@ -524,13 +524,15 @@ def cmd_status() -> None:
         status = mcp.call("session_status")
     markers = status.get("cookies", {})
     usable = status.get("api") == "ok"
-    browser = bool(status.get("browser_path_ready"))
+    browser = bool(status.get("web_session_markers"))
     print(f"\n状态：{'✅ 可用' if usable else '❌ 不可用'}")
     print(f"  本机已保存会话：{'是' if status.get('stored') else '否'}")
     print(f"  API 令牌（NTESSTUDYSI）：{'有' if markers.get('ntesstudysi') else '无'}")
     print(f"  网页会话（STUDY_SESS）：{'有' if markers.get('study_sess') else '无'}")
     print(f"  课程数量：{status.get('course_count', 0)}")
-    print(f"  浏览器路径可用：{'是' if browser else '否'}")
+    # 这两个字段只表示 cookie 标记是否存在，不代表浏览器路径真的能用（实测过两者都在
+    # 却仍被弹去登出的情况），所以不要写成"可用"。
+    print(f"  浏览器路径标记齐全：{'是' if browser else '否'}（标记存在 ≠ 一定可用）")
     print()
     if not usable:
         if not status.get("stored"):
