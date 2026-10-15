@@ -45,13 +45,15 @@ python mooc.py auto     # 之后每次：挑一门课，把没学完的视频/�
 
 | 命令 | 作用 |
 |---|---|
-| `python mooc.py` | 显示帮助 |
+| `python mooc.py` | 不带参数时给出编号菜单（同 exe 双击后的界面） |
 | `python mooc.py login` | 登录（约 4 秒，不打开浏览器） |
 | `python mooc.py status` | 会话体检（只读，约 2 秒） |
 | `python mooc.py auto` | 最省事：挑一门课刷完没学完的 |
 | `python mooc.py courses` | 列出所有课程，拿到 `course_id` / `term_id` |
 | `python mooc.py units <课程ID> <学期ID> [--school XDU]` | 列出课件与完成度 |
 | `python mooc.py study <课程ID> <学期ID> [--school XDU]` | 刷指定课程 |
+| `python mooc.py settings` | 编号菜单里改设置（视频播放 / 密码显示） |
+| `python mooc.py settings reset` | 恢复默认值 |
 
 ### 常用选项
 
@@ -64,8 +66,12 @@ python mooc.py auto     # 之后每次：挑一门课，把没学完的视频/�
 | `--unit <单元ID>` | 只刷指定单元 |
 | `--transport rpc` | 默认 `rpc`；也可 `playwright` / `auto` |
 | `--browser` | 登录时改用浏览器通道（能处理验证码/短信） |
-| `--hide-password` | 输入密码时不回显（**默认可见**，见下） |
+| `--hide-password` | 本次不回显密码（覆盖"设置"里的值） |
 | `-u <手机号>` | 直接指定登录账号 |
+
+这些选项**不填就走「设置」里保存的值**，命令行明确写了才覆盖这一次 ——
+所以"设置里存 2 倍速、偶尔想跑一次 1 倍速"是成立的。设置存在
+`~/.config/icourse163-mcp/settings.json`，只写改过的项。
 
 ### 关于密码输入
 
@@ -84,6 +90,41 @@ python mooc.py auto     # 之后每次：挑一门课，把没学完的视频/�
 | 刷课时偶发"并发限制" | 脚本已自动退避重试；仍失败就加大 `--delay` |
 | 登录被要求滑动验证码/短信 | `python mooc.py login --browser` |
 | 有测验/讨论没做 | 脚本会列出来，需你手动完成（不自动答题提交） |
+
+### 打包成 exe（双击即用，不需要装 Python 或 Node）
+
+```powershell
+python scripts/build-exe.py        # 产出 dist/mooc/mooc.exe，约 143 MB
+```
+
+把**整个 `dist/mooc` 目录**发给别人，双击 `mooc.exe` 即可：**不需要装 Python，也不需要装
+Node.js**（node.exe 与全部依赖已随包带上）。
+
+打开后就是编号菜单，不需要记任何命令：
+
+```
+🎓 中国大学MOOC 一键刷课
+
+   本机已保存会话。会话是否还有效，选 3 看一眼。
+
+要做什么？
+   1. 登录（第一次用选这个，约 4 秒）
+   2. 开始刷课（挑一门课，把没学完的刷完）
+   3. 查看状态（登录还有效吗）
+   4. 设置（视频播放 / 密码显示）
+   0. 退出
+```
+
+几个专门为"双击"做的处理：
+
+- **结束时等你按回车**才关窗口（否则结果一闪就没了）。从已有终端运行时不会多停 —— 靠
+  Windows 的 `GetConsoleProcessList` 判断控制台是不是本进程独占的
+- **提示文案自动适配**：exe 里说的是 `mooc.exe auto`，源码里说的是 `python mooc.py auto`
+- **设置存在用户目录**（`~/.config/icourse163-mcp/settings.json`），不在程序目录里，
+  所以放在 `Program Files` 之类的只读位置也能用
+
+**为什么是 onedir（一个目录）而不是单文件**：单文件每次启动都要把约 130MB 解压到临时目录，
+冷启动要好几秒；onedir 是一打开就进菜单。exe 只是个入口，资源都在旁边的 `_internal` 里。
 
 ## 2. 给 AI agent 用：MCP 服务器
 

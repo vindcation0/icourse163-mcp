@@ -25,3 +25,10 @@ session.json
 .icourse163/
 .icourse163-session*
 NTESSTUDYSI*
+
+# Python 打包/缓存（build-exe.py 的中间产物很大，不能进仓库）
+__pycache__/
+*.pyc
+packaging/
+build/
+!scripts/build-exe.py
