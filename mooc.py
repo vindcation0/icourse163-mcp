@@ -749,82 +749,67 @@ def settings_menu() -> None:
 SESSION_PATH = Path.home() / ".config" / "icourse163-mcp" / "session"
 
 
-def first_run_menu(args: argparse.Namespace) -> None:
-    """不带参数运行（例如双击 exe）时的主菜单。
+def main_actions(args: argparse.Namespace) -> list[tuple[str, object]]:
+    """两个菜单共用的动作列表，免得两处各写一份、日后漂移。
 
-    只检查会话文件在不在（不启动 Node，所以是瞬时的），用来提示"还没登录过"。
+    带「重新登录」是必须的：双击 exe 的用户没法加命令行参数，会话失效后如果菜单里
+    没有这一项，他就只能干看着了。
     """
-    print("🎓 中国大学MOOC 一键刷课\n")
-    if SESSION_PATH.exists():
-        print(f"   本机已保存会话。会话是否还有效，选 3 看一眼。")
-    else:
-        print(f"   {WARN} 看起来还没登录过，先选 1 登录。")
-
-    actions: list[tuple[str, str, object]] = [
-        ("登录（第一次用选这个，约 4 秒）", lambda: cmd_login(args)),
+    return [
         ("开始刷课（挑一门课，把没学完的刷完）", lambda: cmd_auto(args)),
         ("查看状态（登录还有效吗）", cmd_status),
+        ("列出我的课程", cmd_courses),
         ("设置（视频播放 / 密码显示）", settings_menu),
+        ("重新登录（换账号，或登录失效时用）", lambda: cmd_login(args)),
     ]
 
+
+def run_menu(args: argparse.Namespace, footer: str = "") -> None:
+    actions = main_actions(args)
     while True:
-        picked = ask_choice("要做什么？", [label for label, _ in actions], back_label="退出")
+        picked = ask_choice(
+            "要做什么？",
+            [label for label, _ in actions],
+            extra=footer,
+            back_label="退出",
+        )
         if picked is None:
             print("   再见。")
             return
         print()
         try:
-            action = actions[picked][1]
-            action()  # type: ignore[operator]
+            actions[picked][1]()  # type: ignore[operator]
         except SystemExit:
             # 子命令的退出码语义只作用于它自己，菜单继续。
             pass
 
 
+def first_run_menu(args: argparse.Namespace) -> None:
+    """不带参数运行（例如双击 exe）时的入口。
+
+    **本机还没有会话时直接进登录，不摆菜单** —— 第一次用除了登录没别的能做，
+    摆出选项只是让人多点一次。登录成功后 cmd_login 会接着给出编号菜单。
+    """
+    if not SESSION_PATH.exists():
+        print("🎓 中国大学MOOC 一键刷课")
+        print("\n   第一次用，先登录。登录一次以后就不用再输了。\n")
+        cmd_login(args)
+        return
+
+    print("🎓 中国大学MOOC 一键刷课\n")
+    print("   本机已保存会话。要是提示失效，选 2 看一眼、选 5 重新登录。")
+    run_menu(args)
+
+
 def post_login_menu(args: argparse.Namespace) -> None:
-    """登录成功后的编号菜单：输入序号即执行，0 退出。
+    """登录成功后的编号菜单。
 
     非交互式环境（管道、重定向）不提问，只打印提示后返回，避免 EOFError 崩掉脚本。
-    子命令自己 raise SystemExit 时只结束该项，菜单继续 —— 刚登录完不该因为一次
-    子命令失败就把整个会话丢掉。
     """
     if not sys.stdin.isatty():
         print("   下一步：python mooc.py auto（刷课）或 python mooc.py status（体检）")
         return
-
-    actions: list[tuple[str, str, object]] = [
-        ("1", "开始刷课（挑一门课，把没学完的刷完）", lambda: cmd_auto(args)),
-        ("2", "看看会话状态", cmd_status),
-        ("3", "列出我的课程", cmd_courses),
-        ("4", "设置（视频播放 / 密码显示）", settings_menu),
-        ("0", "退出", None),
-    ]
-
-    while True:
-        print("\n接下来要做什么？")
-        for key, label, _ in actions:
-            print(f"   {key}. {label}")
-        try:
-            raw = input("\n请输入序号（直接回车=1）：").strip() or "1"
-        except EOFError:
-            # 没有 TTY 也可能走到这里（isatty() 为真但读取即 EOF）。给一行提示再退出，
-            # 免得输出看起来像被截断了。
-            print("   下一步：python mooc.py auto（刷课）或 python mooc.py status（体检）")
-            return
-        match = next((entry for entry in actions if entry[0] == raw), None)
-        if match is None:
-            print(f"   {WARN} 请输入列表里的序号（0-4）。")
-            continue
-        _, label, action = match
-        if action is None:
-            print("   再见。")
-            return
-        print()
-        try:
-            action()  # type: ignore[operator]
-        except SystemExit:
-            # 子命令有自己的退出码语义；在这里只结束这一项，菜单继续。
-            pass
+    run_menu(args)
 
 
 def cmd_login(args: argparse.Namespace) -> None:

@@ -73,23 +73,40 @@ def args(**over):
     return argparse.Namespace(**base)
 
 
-print("=== 1. 不带参数：主菜单 4 项 + 退出 ===")
+print("=== 1. 已有会话 + 不带参数：给出编号菜单 ===")
+real_session = mooc.SESSION_PATH
+mooc.SESSION_PATH = Path(real_session)  # 真实用户目录里确实有会话
 out = run(["0"], mooc.first_run_menu, args())
-check("列出 1~4 项", all(f"   {i}." in out for i in (1, 2, 3, 4)), out)
-check("没有第 5 项", "   5." not in out)
+check("列出 1~5 项", all(f"   {i}." in out for i in (1, 2, 3, 4, 5)), out)
 check("有 0 退出", "   0. 退出" in out, out)
-check("未登录时提示先登录", "还没登录过" in out or "已保存会话" in out, out)
+check("首项是刷课", "1. 开始刷课" in out, out)
+check("第 4 项是设置", "4. 设置" in out, out)
+check("第 5 项是重新登录", "5. 重新登录" in out, out)
 check("退出有反馈", "再见" in out, out)
 
-print("\n=== 2. 登录后菜单：多出「设置」 ===")
+print("\n=== 1b. 还没有会话时：直接进登录，不摆菜单 ===")
+mooc.SESSION_PATH = TMP / "no-such-session"
+called = []
+real_login = mooc.cmd_login
+mooc.cmd_login = lambda a: called.append("login")
+out = run([], mooc.first_run_menu, args())
+mooc.cmd_login = real_login
+check("直接调用了登录", called == ["login"], str(called))
+check("没有列出任何编号选项", "   1." not in out, out)
+check("没有出现「要做什么」", "要做什么" not in out, out)
+check("提示了第一次用", "第一次用" in out, out)
+mooc.SESSION_PATH = real_session
+
+print("\n=== 2. 登录后菜单：与主菜单同一套动作 ===")
 out = run(["0"], mooc.post_login_menu, args())
-check("列出 1~4", all(f"   {i}." in out for i in (1, 2, 3, 4)), out)
+check("列出 1~5", all(f"   {i}." in out for i in (1, 2, 3, 4, 5)), out)
 check("第 4 项是设置", "4. 设置" in out, out)
+check("第 5 项是重新登录", "5. 重新登录" in out, out)
 check("0 是退出", "   0. 退出" in out, out)
 
 print("\n=== 3. 非法输入：提示并重新列出，不退出 ===")
 out = run(["9", "abc", "0"], mooc.first_run_menu, args())
-check("非法输入有警告", out.count("请输入 1~4") >= 2, out)
+check("非法输入有警告", out.count("请输入 1~5") >= 2, out)
 check("之后仍能正常退出", "再见" in out, out)
 
 print("\n=== 4. 进入设置 → 视频播放设置 → 改成「分块上报」并落盘 ===")
