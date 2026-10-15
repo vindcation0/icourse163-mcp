@@ -68,6 +68,16 @@ export type StudyUnitArgs = {
    * playback_rate, which takes wall-clock duration/rate but is actually recorded.
    */
   skip_to_end?: boolean;
+  /**
+   * RPC transport only. 0 (default) sends one completion report, ~1.4s per unit, leaving
+   * the platform a single 0->100 jump in its logs. A positive value reports that many
+   * seconds per signed request, spaced by chunk/playback_rate of real time, so the
+   * platform sees the same shape of incremental progress a real player produces.
+   *
+   * It genuinely costs the wall-clock time -- that is the entire point -- so a 10 minute
+   * video at chunk 60 and rate 2 takes about 5 minutes.
+   */
+  report_chunk_sec?: number;
   /** Default auto: try RPC, fall back to Playwright on -10006 / 并发限制 / 本地时间 blocks. */
   transport?: StudyTransport;
 };
@@ -91,6 +101,11 @@ export type StudyUnitResult = {
   nav_strategy: NavStrategy | null;
   /** school SPOC vs non_school (e.g. kaopei) track. */
   course_kind: CourseKind | null;
+  /**
+   * RPC transport only: how many signed reports this run sent. 1 is the one-shot
+   * completion report; more means the chunked path was used.
+   */
+  report_chunks?: number;
   errors: ToolError[];
 };
 
@@ -138,6 +153,21 @@ export function clampPageIntervalSec(value: number | undefined): number {
     MAX_PAGE_INTERVAL_SEC,
     Math.max(MIN_PAGE_INTERVAL_SEC, value),
   );
+}
+
+/** Floor/ceiling for a chunked report, in seconds. 0 means "one-shot" and is preserved. */
+export const MIN_REPORT_CHUNK_SEC = 0;
+export const MAX_REPORT_CHUNK_SEC = 600;
+
+/**
+ * A chunk below 5s would mean more requests than a real player ever sends (the platform's
+ * own client uses 60), so anything smaller is lifted to the floor rather than rejected.
+ */
+export function clampReportChunkSec(value: number | undefined): number {
+  if (value == null || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.min(MAX_REPORT_CHUNK_SEC, Math.max(5, Math.floor(value)));
 }
 
 /** True for saveMocContentLearn failures that OCS bypasses via DOM playback (-10006 / clock / concurrency). */
@@ -223,12 +253,27 @@ export function buildVideoLearnReport(input: {
   video_id: string;
   duration_sec: number;
   learned_sec?: number;
+  /**
+   * The playback position this report claims, in seconds.
+   *
+   * `videoTime` is the POSITION, not the total duration. Measured: the platform credits a
+   * report only when `videoTime` advances past what it already recorded. Sending the same
+   * value every time — including the full duration — gets `{"code":0,"result":true}` and
+   * credits nothing. Advancing it 60/120/180/240 on a 559s unit got every report credited,
+   * +60s each, even though they were only 2.5s apart, so no rate limit is involved.
+   *
+   * Defaults to the full duration, which is right for the one-shot completion report.
+   */
+  video_time_sec?: number;
+  /** Default true. An in-progress segment must send false; the final report sets true. */
+  finished?: boolean;
 }): Record<string, unknown> {
   const duration = Math.max(0, Math.floor(input.duration_sec));
   const learned = Math.max(0, Math.min(duration, Math.floor(input.learned_sec ?? duration)));
+  const videoTime = Math.max(0, Math.min(duration, Math.floor(input.video_time_sec ?? duration)));
   return {
     unitId: Number(input.unit_id),
-    finished: true,
+    finished: input.finished ?? true,
     index: 1,
     duration: learned * 1000,
     courseId: Number(input.course_id),
@@ -237,9 +282,40 @@ export function buildVideoLearnReport(input: {
     termId: Number(input.term_id),
     contentType: 1,
     action: "LEARN_TIME_COUNT",
-    videoTime: duration,
+    videoTime,
     learnedVideoTimeCount: learned,
   };
+}
+
+/** One report in a chunked video run. Pure, so the sequence is testable without HTTP. */
+export type VideoChunk = { learned_sec: number; position_sec: number; finished: boolean };
+
+/**
+ * Split a video into the reports a chunked run sends.
+ *
+ * `learned_sec` is per-segment (the platform adds it to what it already holds) while
+ * `position_sec` is the running position and MUST increase every report or nothing is
+ * credited. The last report is always `finished: true`, which is what completes the unit.
+ *
+ * A chunk of 0, or one covering the whole video, yields the single one-shot report.
+ */
+export function planVideoChunks(durationSec: number, chunkSec: number): VideoChunk[] {
+  const duration = Math.max(0, Math.floor(durationSec));
+  if (duration === 0) {
+    return [];
+  }
+  const chunk = Math.max(0, Math.floor(chunkSec));
+  if (chunk === 0 || chunk >= duration) {
+    return [{ learned_sec: duration, position_sec: duration, finished: true }];
+  }
+  const out: VideoChunk[] = [];
+  let position = 0;
+  while (position < duration) {
+    const step = Math.min(chunk, duration - position);
+    position += step;
+    out.push({ learned_sec: step, position_sec: position, finished: position >= duration });
+  }
+  return out;
 }
 
 /**
@@ -381,6 +457,7 @@ export async function studyUnit(
   const transport = normalizeStudyTransport(args.transport);
   const pageIntervalSec = clampPageIntervalSec(args.page_interval_sec);
   const skipToEnd = args.skip_to_end !== false;
+  const reportChunkSec = clampReportChunkSec(args.report_chunk_sec);
 
   if (located.unit_type === "doc") {
     return studyDocUnit({
@@ -427,6 +504,7 @@ export async function studyUnit(
     pageIntervalSec,
     skipToEnd,
     transport,
+    reportChunkSec,
   });
 }
 
@@ -657,6 +735,7 @@ async function studyVideoUnit(input: {
   pageIntervalSec: number;
   skipToEnd: boolean;
   transport: StudyTransport;
+  reportChunkSec: number;
 }): Promise<StudyUnitResult> {
   const {
     base,
@@ -671,6 +750,7 @@ async function studyVideoUnit(input: {
     pageIntervalSec,
     skipToEnd,
     transport,
+    reportChunkSec,
   } = input;
 
   const referer = learnReferer(course);
@@ -745,6 +825,83 @@ async function studyVideoUnit(input: {
     };
   }
 
+  // Chunked reporting: send the same shape of incremental progress a real player sends.
+  // This is the only mode that makes the platform's logs look like playback rather than a
+  // single 0->100 jump, and it costs real time by construction.
+  const chunks = planVideoChunks(durationSec, reportChunkSec);
+  if (chunks.length > 1) {
+    let reported = 0;
+    for (const [index, chunk] of chunks.entries()) {
+      const dto = buildVideoLearnReport({
+        course_id: courseId,
+        term_id: termId,
+        lesson_id: located.lesson_id,
+        unit_id: unitId,
+        video_id: contentId,
+        duration_sec: durationSec,
+        learned_sec: chunk.learned_sec,
+        video_time_sec: chunk.position_sec,
+        finished: chunk.finished,
+      });
+      const res = await saveLearnDto({
+        http: ports.http,
+        cookie: session.cookie,
+        csrfKey: session.csrfKey,
+        referer,
+        dto,
+      });
+      if (res.kind !== "saved") {
+        // Progress already reported is genuinely recorded, so surface how far it got
+        // instead of pretending the whole run failed.
+        const where =
+          res.kind === "error" ? res.where : res.kind === "auth_expired" ? "credentials" : "save_learn";
+        return {
+          ...base,
+          isError: true,
+          status: res.kind === "auth_expired" ? "auth_expired" : "error",
+          unit_type: "video",
+          completed: false,
+          learned_sec: reported,
+          duration_sec: durationSec,
+          percent: durationSec > 0 ? Math.round((reported / durationSec) * 100) : 0,
+          playback_rate: playbackRate,
+          transport: "rpc",
+          report_chunks: index,
+          errors: [
+            {
+              where,
+              message: `chunked report ${index + 1}/${chunks.length} failed after ${reported}s of ${durationSec}s: ${res.message}`,
+            },
+          ],
+        };
+      }
+      reported += chunk.learned_sec;
+      const isLast = index === chunks.length - 1;
+      if (!isLast) {
+        // The pacing is the point: chunk/rate seconds of real time, like a player at rate.
+        await sleepMs((chunk.learned_sec / playbackRate) * 1000);
+      }
+    }
+    return {
+      ...base,
+      isError: false,
+      status: "ok",
+      unit_type: "video",
+      completed: true,
+      learned_sec: durationSec,
+      duration_sec: durationSec,
+      percent: 100,
+      playback_rate: playbackRate,
+      page_count: null,
+      page_interval_sec: null,
+      transport: "rpc",
+      nav_strategy: null,
+      course_kind: classifyCourseKind(course.school_short_name),
+      report_chunks: chunks.length,
+      errors: [],
+    };
+  }
+
   const dto = buildVideoLearnReport({
     course_id: courseId,
     term_id: termId,
@@ -763,6 +920,7 @@ async function studyVideoUnit(input: {
   });
   if (saved.kind === "saved") {
     return {
+      ...base,
       isError: false,
       status: "ok",
       course_id: courseId,
@@ -779,6 +937,7 @@ async function studyVideoUnit(input: {
       transport: "rpc",
       nav_strategy: null,
       course_kind: classifyCourseKind(course.school_short_name),
+      report_chunks: 1,
       errors: [],
     };
   }

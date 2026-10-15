@@ -276,7 +276,39 @@ npm run login:http --silent -- -u <手机号> --channel phone
 | **等待 100 秒**后再报 | 0（**推翻"按墙钟限速"**） |
 | 换一个**全新单元**重复 | 同样：第一次计入，第二次 0 |
 
-所以分块上报**目前无法正确实现** —— 照现在这么写，报了也不会被计入。
+### ✅ 已解决：根因是 `videoTime` 的语义（**分块上报现在已实现**）
+
+**`videoTime` 是「播放位置」，不是总时长。** 服务端只在它**前进**时才计入；重复发同一个值
+（包括总时长）会拿到 `{"code":0,"result":true}` 但**一分不记**。
+
+这正是之前"只有第一次增量被计入"的全部原因 —— 我们每次都发同一个位置，服务端读作"没前进"。
+
+**判定实验**（559 秒单元，learned 固定 60，只让位置前进）：
+
+```
+videoTime=60  → 65.0 秒
+videoTime=120 → 125.0 秒
+videoTime=180 → 185.0 秒
+videoTime=240 → 245.0 秒     每步 +60，四次全部计入
+```
+
+这些上报**间隔只有 2.5 秒**，全部计入 —— 所以**根本不存在限速**。
+
+**实现**（`src/study-unit.ts`）：
+
+- `planVideoChunks(duration, chunk)` —— 纯函数，切出每段的
+  `{learned_sec, position_sec, finished}`；位置严格递增，只有最后一段 `finished: true`
+- `buildVideoLearnReport` 新增 `video_time_sec` / `finished`
+- `study_unit` 新增 `report_chunk_sec`（MCP 参数）与 `mooc.py --chunk`
+- 每段之间 `sleep(chunk / playback_rate)` —— **这段真实耗时就是它存在的意义**
+- 中途失败时**如实报告已报了多少秒**（已报的部分服务端确实已记），而不是假装整体失败
+
+**实测**（单元 `1305151991`，337 秒，`chunk=60`、`rate=2`）：耗时 153 秒、
+`report_chunks: 6`、`percent: 100`，单元已完成。
+
+> ⚠️ **仍未做**：**文档单元的节奏**。文档路径的等待逻辑依赖 `pageCount`，而它只来自那个
+> 恒失败的 `learnVo`，所以 RPC 下永远不触发。下一步应先探明文档是否也靠某个"前进"字段
+> 计入（`lastLearnTime` / `pageNum`），再决定实现方式 —— 不要照搬视频的做法。
 
 ### 怀疑方向已被实测否定：**没有第二个端点**
 

@@ -308,6 +308,7 @@ def study_units(
     transport: str,
     dry_run: bool,
     delay: float,
+    chunk: float,
 ) -> None:
     result = mcp.call(
         "list_term_units",
@@ -364,6 +365,7 @@ def study_units(
                 "school_short_name": school,
                 "playback_rate": rate,
                 "transport": transport,
+                "report_chunk_sec": chunk,
             },
         )
         if out.get("isError"):
@@ -379,6 +381,9 @@ def study_units(
                 detail = f"{out['page_count']} 页"
             elif out.get("learned_sec"):
                 detail = f"{out['learned_sec']}s"
+            chunks = out.get("report_chunks")
+            if isinstance(chunks, int) and chunks > 1:
+                detail += f"，{chunks} 段上报"
             print(f"      {OK} 完成 {detail}（{out.get('transport')}）")
         if delay > 0 and index < len(todo_media):
             time.sleep(delay)
@@ -601,6 +606,7 @@ def cmd_study(args: argparse.Namespace, *, interactive: bool) -> None:
             transport=args.transport,
             dry_run=args.dry_run,
             delay=args.delay,
+            chunk=args.chunk,
         )
 
 
@@ -620,6 +626,7 @@ def cmd_auto(args: argparse.Namespace) -> None:
             transport=args.transport,
             dry_run=args.dry_run,
             delay=args.delay,
+            chunk=args.chunk,
         )
 
 
@@ -642,6 +649,9 @@ login 还能加：
 
 study / auto 还能加：
   --rate 2            视频倍速（0.5~2，默认 2）
+  --chunk 60          分块上报：每 60 秒发一次（默认 0=关闭）
+                      默认是"一次报满"，服务端日志里是一跳 0→100；
+                      开了它服务端看到的是逐段推进，但真实耗时约 时长/倍速
   --dry-run           只看看要刷什么，不动手
   --timeout 300       单个单元的超时秒数
   --delay 0.6         每个单元之间停顿的秒数（被限流时加大，例如 2）
@@ -662,6 +672,16 @@ def main() -> None:
     parser.add_argument("--term", default=None, help="按学期ID筛选（auto 用）")
     parser.add_argument("--unit", default=None, help="只刷这个单元")
     parser.add_argument("--rate", type=float, default=2.0)
+    parser.add_argument(
+        "--chunk",
+        type=float,
+        default=0.0,
+        help=(
+            "分块上报：每 N 秒发一次签名上报（0=关闭，默认）。"
+            "开启后服务端看到的是逐段推进，而不是一次 0→100 跳变；"
+            "代价是真实耗时约 时长/倍速"
+        ),
+    )
     parser.add_argument("--transport", default="rpc", choices=["rpc", "auto", "playwright"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(

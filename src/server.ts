@@ -52,7 +52,7 @@ const LIST_TERM_UNITS_DESCRIPTION = [
 
 const STUDY_UNIT_DESCRIPTION = [
   "Advance learning progress for one video/audio/doc 课件 unit on 中国大学MOOC (align OCS watchMedia / readPPT).",
-  "Args: course_id, term_id, unit_id from list_courses / list_term_units; optional school_short_name; optional playback_rate (0.5–2, default 1); optional page_interval_sec (0–10, default 1) for doc/PPT; optional transport (auto|rpc|playwright, default auto).",
+  "Args: course_id, term_id, unit_id from list_courses / list_term_units; optional school_short_name; optional playback_rate (0.5–2, default 1); optional page_interval_sec (0–10, default 1) for doc/PPT; optional report_chunk_sec (RPC only, default 0 = one completion report; positive = report that many seconds per signed request, paced by chunk/playback_rate of real time so the platform sees incremental progress instead of a single jump); optional transport (auto|rpc|playwright, default auto).",
   "Default auto: try saveMocContentLearn RPC, then Playwright DOM playback when RPC is blocked (-10006 / 本地时间 / 并发限制). Explicit transport=playwright skips RPC save; transport=rpc is RPC-only.",
   "Returns completed, learned_sec/duration_sec (video), page_count (doc), percent, transport=rpc|playwright. Needs system Chrome (see docs/mcp.md).",
   "Distinct failures: non_media_unit, auth_expired, page_structure_change, needs_quiz_assist (video popup — use get_homework → save_homework_answers; never silent-submit).",
@@ -204,6 +204,12 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           .describe(
             "Default true: seek straight to the end of the media. Fast, but the platform does not credit that progress. Set false to play through at playback_rate (takes duration/rate) so the learning is actually recorded.",
           ),
+        report_chunk_sec: z
+          .number()
+          .optional()
+          .describe(
+            "RPC transport only. 0 (default) sends one completion report (~1.4s/unit), which shows up as a single 0->100 jump. A positive value reports that many seconds per signed request, spaced by chunk/playback_rate of real time, so the platform sees the incremental progress a real player produces. Costs the real time by design: 10 minutes of video at chunk 60 with playback_rate 2 takes about 5 minutes. The platform credits a report only when videoTime advances, so chunks must be at least 5s.",
+          ),
         transport: z
           .enum(["auto", "rpc", "playwright"])
           .optional()
@@ -222,6 +228,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           playback_rate: args.playback_rate,
           page_interval_sec: args.page_interval_sec,
           skip_to_end: args.skip_to_end,
+          report_chunk_sec: args.report_chunk_sec,
           transport: args.transport,
         },
         ports,

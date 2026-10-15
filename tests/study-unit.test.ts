@@ -5,12 +5,15 @@ import { TERM_RPC_URL, WARMUP_URL } from "../src/auth";
 import { learnReferer } from "../src/course-rpc";
 import {
   LEARN_VO_RPC_URL,
+  MAX_REPORT_CHUNK_SEC,
   SAVE_LEARN_RPC_URL,
   buildDocLearnReport,
   buildVideoLearnReport,
   clampPageIntervalSec,
+  clampReportChunkSec,
   findUnitInMocTerm,
   isLearnProgressBlockedMessage,
+  planVideoChunks,
   studyUnit,
 } from "../src/study-unit";
 import type {
@@ -224,6 +227,99 @@ describe("buildVideoLearnReport", () => {
     });
     assert.equal(dto.learnedVideoTimeCount, 60);
     assert.equal(dto.duration, 60000);
+  });
+
+  // videoTime is the POSITION, not the total duration. Measured on a 559s unit: advancing
+  // it 60/120/180/240 got all four reports credited (+60s each, 2.5s apart), while sending
+  // an unchanging value got code 0 and credited nothing. Getting this wrong is what made
+  // incremental reporting look impossible.
+  test("video_time_sec overrides the position so a chunk can advance", () => {
+    const base = {
+      course_id: "1",
+      term_id: "2",
+      lesson_id: "3",
+      unit_id: "4",
+      video_id: "5",
+      duration_sec: 559,
+      learned_sec: 60,
+    };
+    const first = buildVideoLearnReport({ ...base, video_time_sec: 60, finished: false });
+    assert.equal(first.videoTime, 60);
+    assert.equal(first.learnedVideoTimeCount, 60);
+    assert.equal(first.finished, false);
+    const second = buildVideoLearnReport({ ...base, video_time_sec: 120, finished: false });
+    assert.equal(second.videoTime, 120);
+    // The two reports must differ, otherwise the platform reads it as "no advance".
+    assert.notEqual(first.videoTime, second.videoTime);
+    // Omitted stays at the full duration, which is what the one-shot report needs.
+    assert.equal(buildVideoLearnReport(base).videoTime, 559);
+    assert.equal(buildVideoLearnReport(base).finished, true);
+  });
+
+  test("video_time_sec is clamped into the video", () => {
+    const dto = buildVideoLearnReport({
+      course_id: "1",
+      term_id: "2",
+      lesson_id: "3",
+      unit_id: "4",
+      video_id: "5",
+      duration_sec: 100,
+      learned_sec: 60,
+      video_time_sec: 9999,
+    });
+    assert.equal(dto.videoTime, 100);
+  });
+});
+
+describe("planVideoChunks", () => {
+  test("chunk 0 is the single one-shot report", () => {
+    assert.deepEqual(planVideoChunks(600, 0), [
+      { learned_sec: 600, position_sec: 600, finished: true },
+    ]);
+  });
+
+  test("splits a video and only the last report is finished", () => {
+    const chunks = planVideoChunks(150, 60);
+    assert.deepEqual(chunks, [
+      { learned_sec: 60, position_sec: 60, finished: false },
+      { learned_sec: 60, position_sec: 120, finished: false },
+      { learned_sec: 30, position_sec: 150, finished: true },
+    ]);
+  });
+
+  test("learned_sec sums to the duration and the position always advances", () => {
+    const chunks = planVideoChunks(559, 60);
+    const total = chunks.reduce((sum, c) => sum + c.learned_sec, 0);
+    assert.equal(total, 559);
+    assert.equal(chunks.at(-1)?.position_sec, 559);
+    assert.equal(chunks.at(-1)?.finished, true);
+    // Strictly increasing: a repeated videoTime is credited 0 by the platform.
+    for (let i = 1; i < chunks.length; i += 1) {
+      assert.ok(chunks[i].position_sec > chunks[i - 1].position_sec);
+    }
+    assert.equal(chunks.filter((c) => c.finished).length, 1);
+  });
+
+  test("a chunk longer than the video degrades to one report", () => {
+    assert.deepEqual(planVideoChunks(30, 60), [
+      { learned_sec: 30, position_sec: 30, finished: true },
+    ]);
+  });
+
+  test("a zero-length video yields nothing", () => {
+    assert.deepEqual(planVideoChunks(0, 60), []);
+  });
+});
+
+describe("clampReportChunkSec", () => {
+  test("treats 0 and nonsense as off, and lifts tiny chunks to the floor", () => {
+    assert.equal(clampReportChunkSec(undefined), 0);
+    assert.equal(clampReportChunkSec(0), 0);
+    assert.equal(clampReportChunkSec(-5), 0);
+    assert.equal(clampReportChunkSec(Number.NaN), 0);
+    assert.equal(clampReportChunkSec(1), 5);
+    assert.equal(clampReportChunkSec(60), 60);
+    assert.equal(clampReportChunkSec(99_999), MAX_REPORT_CHUNK_SEC);
   });
 });
 
