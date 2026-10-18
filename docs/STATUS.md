@@ -12,15 +12,19 @@
 `mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，8 个工具）。
 
 **一句话现状**：
-> **登录、刷课、读题、答题提交 —— 全部纯 HTTP 可用且已实测。**
-> **讨论区完全没做。考试按设计不做。**
+> **登录、刷课、读题、答题提交、讨论区回复 —— 全部纯 HTTP 可用且已实测。**
+> 讨论区的机制已验证但**还没写进代码**。考试按设计不做。
 > 剩下的是工作量，不是未知。
 
-**最重要的三条结论**（这轮才确定的，之前的文档写错了）：
+**最重要的五条结论**（都是实测打出来的，之前的文档写错过）：
 
 1. `submitAnswers`**不需要签名**，一次真实提交拿到 **8/8 满分**
 2. `preview:true`（草稿）**不是通用的** —— 部分卷子服务端直接拒绝，只能正式提交
 3. 算出来的答案要按 **`options[].content` 正文匹配**再取 id，**不能写死选项顺序**
+4. **随堂测试的答案就在试卷里** —— `optionDtos[].answer` 与填空题的 `stdAnswer` 在**提交前**就返回
+   （`showAnalysis:false` 只是界面不显示）。章节测验**不**泄露。所以随堂测试可以零题库完成。
+5. **新旧 API 是两套鉴权** —— `/web/j/*.rpc` 认我们的 URS 纯 HTTP 会话；
+   `/front-mooc-learn/api/learn/*`（讨论区所在）**只认浏览器登录的 cookie**
 
 ---
 
@@ -125,6 +129,37 @@
 - keychain 里是裁剪后的 **990 字符 / 7 个** cookie（能塞进 2560 字节上限）
 - 文件里是更早的 **1703 字符 / 17 个**
 - `getCookie()` **优先读 keychain** → 直接读文件的探针会拿到另一个值，导致结论不可比
+
+---
+
+### 4.8 新版 Next.js API 与旧版 RPC 是**两套鉴权**（2026-10-18 实测）
+
+站点有两层接口，别把它们混为一谈：
+
+| 层 | 基址 | 我们的 URS 纯 HTTP 会话 | 用途 |
+|---|---|---|---|
+| 旧版 RPC | `/web/j/*Bean.*.rpc` | ✅ **有效** | 刷课、读题、交卷、目录 —— 整个工具都靠它 |
+| **新版 Next.js API** | **`/front-mooc-learn/api/learn/*`** | ❌ **被当成匿名** | 讨论区、课件页数据 |
+
+- 基址**不是** `/api/learn/*`（那个 404）—— 写错路径会得到 404 或 SSO 桥接页，看起来像"不可达"
+- 新版 API 需要**浏览器登录的 cookie**（含 `STUDY_INFO` + `STUDY_SESS`），否则写操作一律
+  `401 请先登录后继续`
+- 判据陷阱：`personalUserId:null` **不能**说明未登录（登录 cookie 下也是 null）；
+  可靠判据是 `followedStatus` 从 `UNAUTHENTICATED` → `AVAILABLE`
+- `forum/index` 的 `canWrite:false` + `writeReason:"当前接口仅提供只读讨论区数据"` 是**读接口自己的
+  属性**，与 `forum/write` 能否写无关
+- **战略风险**：站点正在把进度/测验迁到新 API（`content/progress`、`content/lesson-quiz`）。
+  若旧版 RPC 哪天下线，整条纯 HTTP 链路会失效，只能退回浏览器
+
+### 4.9 讨论区：回复单元自己的主题才会点亮任务点（2026-10-18 实测）
+
+- 讨论单元的 `contentId` **就是**老师创建的那个主题 id
+- **回复它**（`action:"addReply"`, `postId=<contentId>`）→ `completePercent` 0→1、`viewStatus` 0→5、
+  `replyCount` null→1，**一次调用，无需额外上报**
+- **新建帖子**（`createOrUpdatePost` + `lessonUnitId`）**不行**：帖子能发出去，但服务端把
+  `lessonUnitId` 丢弃（读回来是 `null`），任务点不动
+- 只发 `saveMocContentLearn(contentType=6)` **也不行**（无论有没有回复）
+- 完整配方见 [`ROADMAP.md` §7](ROADMAP.md)
 
 ---
 

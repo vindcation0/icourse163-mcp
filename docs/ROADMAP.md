@@ -66,20 +66,44 @@
 
 ADR 0003 记的是**设计决策**，现已用一次真实提交验证了主干；其中"草稿优先"的假设需要按上面的结论修正。
 
+### 0.3c 🔑 **试卷自带答案：随堂测试根本不需要题库**（2026-10-18 实测，改变了 P2/P3 的成本结构）
+
+`getOpenQuizPaperDto` 对不同卷子返回的东西不一样，这一点之前没人注意到：
+
+| 卷子类型 | 提交前是否泄露答案 | 字段 |
+|---|---|---|
+| **随堂测试**（单元级，`contentType=5`） | ✅ **泄露** | 选择题：`optionDtos[].answer = true/false`；填空题：`stdAnswer = "最后用力"` |
+| **章节测验**（`chapters.quizs`） | ❌ 不泄露 | 实测 0/10 题带 `answer` 标记 |
+
+而且是 `showAnalysis:false` —— **界面上不显示，接口照样给**。
+
+**后果**：
+
+- 随堂测试可以**零题库**完成。已用它把本学期的 **57/57** 随堂测试全部做完。
+- 章节测验仍然需要题库（或人工）。
+- 题库层（P2）的必要性从"所有客观题"缩小到"章节测验 + 其他课程"。
+
+**顺带修掉的两个坑**：
+
+- 填空题的 `bank` 也是 `"objective"`，但**没有选项**，所以会走进"需要 option_ids"的分支被拒。
+  它必须插在 `bank` 判断**之前**，载荷是 `fillAnswers: [text]`（实测提交成功）。
+- `current_answer` 之前会 fallback 到 `stdAnswer`，导致"从没答过的题看起来答过了"。
+  现在 `std_answer` 是独立字段，选项带可选的 `correct` 标记。
+
 ### 0.4 ❌ 已知缺陷（都是读代码/实测发现的）
 
 | # | 缺陷 | 后果 |
 |---|---|---|
-| D1 | `stripHtml` 只解 `&nbsp; &lt; &gt; &quot;` 与数字实体，**不解 `&rlm;` 等命名实体** | 题库查询串被污染（实测题干里就带 `&rlm;`），匹配率下降 |
+| D1 | ~~`stripHtml` 只解少数实体，不解 `&rlm;`~~ → ✅ **已修**（解命名实体 + 清零宽/双向标记） | — |
 | D2 | `session_status` 只要面板 RPC 成功就报 **`可用`**，即使 `course_count=0` | 实测出现过"可用但 0 门课"的半死会话，用户会被误导 |
-| D3 | 无**覆盖率闸门** | 题库答不出时也会照常提交，等于交部分答案 |
+| D3 | ~~无**覆盖率闸门**~~ → ⚠️ **部分已修**：`solve_quiz` 有 `min_coverage`（默认 0.8）；`submit_homework` 直接调用时仍然没有 | 绕过 `solve_quiz` 手填仍可能交半成品 |
 | D4 | 无**得分回读** | 交完不知道为什么没满分 |
 | D5 | 无**答错重做** | 只能"交一次"，拿不到满分 |
 | D6 | `type=6` 测验**没有草稿态**（ADR 0003 记录：返回"预览不能提交！"） | 对这类卷只能用 `submit`，不能先草稿 |
 
 ### 0.5 ❌ 完全未实现
 
-- **讨论区**：全仓库只有一行注释提到 `contentType 6 = discuss`，且被归类成 `other`。**零代码、零端点知识。**
+- **讨论区**：机制已经打通并 live 验证（见 §7），但**仓库里还没有代码** —— 目前只有一次性脚本跑过。
 - **考试代交**：🚫 明确不做（`submitHomework` 硬拒绝 exam，三处文档一致）。
 
 ---
@@ -250,19 +274,79 @@ README 的"答题"一节补上"测验是客观题、作业是主观题"这个实
 
 ---
 
-## 7. P5：讨论区（**独立立项，风险最高**）
+## 7. P5：讨论区 —— ✅ **机制已完全打通（2026-10-18 实测，代价从 2.5d 降到 0.5d）**
 
-| 步骤 | 代价 |
+原计划"端点发现 1d + 实现 1.5d"作废：端点、参数、body 全部查明，并已 live 验证任务点会亮。
+
+### 7.1 完整配方（照抄即可）
+
+```text
+① 找讨论单元
+GET /front-mooc-learn/api/learn/terms/{termId}/content-outline
+      ?courseKey={school}-{courseId}&entryMode=learn
+→ 遍历 chapters/lessons/units，取 contentType=6 的单元；
+  它的 contentId 就是该单元讨论主题的 id
+
+② 回复那个主题
+POST /front-mooc-learn/api/learn/forum/write
+{
+  "action": "addReply",
+  "courseKey": "CUPES-1449647163",
+  "termId": "<字符串，不是数字>",
+  "forumScope": "mooc",
+  "postId": "<单元的 contentId>",
+  "content": "…",
+  "photos": [],
+  "anonymous": false
+}
+
+③ 任务点自动完成
+实测：completePercent 0→1，viewStatus 0→5，replyCount null→1。
+一次调用，**不需要**再发 saveMocContentLearn。
+```
+
+### 7.2 三个反直觉的点（全部实测，不要再试）
+
+| 做法 | 结果 |
 |---|---|
-| P5-A 端点发现（抓包或 bundle 分析） | 1d |
-| P5-B 实现：读帖 + 抄一条已有回复（超星项目的 4 种策略：不回复/最多出现/最多赞/最新） | 1.5d |
+| `createOrUpdatePost` + `lessonUnitId` 新建帖子 | 帖子能发出去，但服务端**丢弃 `lessonUnitId`**（读回来是 `null`）→ 任务点不动 |
+| 只发 `saveMocContentLearn(contentType=6)` | 返回 `code 0`，但 `completePercent`/`viewStatus` 仍 0 → **无效**，有没有回复都一样 |
+| **`addReply` 回复单元自己的主题** | ✅ 任务点立刻完成 |
 
-**风险明显高于答题**：
-- 回复是**对外公开**的内容，发错不是扣分而是"公开出错"
-- 可能有防刷（频率、重复内容检测）
-- 讨论区在总评里通常占比很小
+**语义关键**：讨论任务 = "回复那节课的主题"，不是"新建一个帖子"。主题由老师创建（例：
+「谈一谈你对现在田径运动的发展特点及趋势的认识」），单元 `contentId` 就是主题 id。
 
-**建议**：先确认你那 159 个待办里讨论区到底占多少分，再决定要不要投入 2.5 天。
+### 7.3 API 基址与鉴权（最容易踩的坑）
+
+- 基址是 **`/front-mooc-learn/api/learn/*`**，**不是** `/api/learn/*`（后者 404）
+- **新旧 API 是两套鉴权，这是本项目最重要的边界之一**：
+
+| 层 | 我们的 URS 纯 HTTP 会话 |
+|---|---|
+| `/web/j/*.rpc`（刷课 / 读题 / 交卷） | ✅ 有效 —— 整个工具都靠它 |
+| `/front-mooc-learn/api/learn/*`（讨论区等） | ❌ 被当成匿名 —— 需要**浏览器登录的 cookie**（含 `STUDY_INFO` + `STUDY_SESS`），否则写操作一律 401「请先登录后继续」 |
+
+- `forum/index` 的 `canWrite:false` / `writeReason:"当前接口仅提供只读讨论区数据"` 是**读接口自己的
+  属性**，与 `forum/write` 能否写无关
+- **`personalUserId:null` 不能作为"未登录"的判据** —— 登录 cookie 下它照样是 null
+- 可靠判据：`followedStatus` 从 `UNAUTHENTICATED` → `AVAILABLE`
+
+### 7.4 读取接口
+
+```text
+GET /api/learn/forum/index?courseKey&page&sort&tid&forumScope=mooc
+    → boards[]（含 allowLearnerPost）、topics[]、totalCount
+GET /api/learn/forum/detail?courseKey&page&pid&sort&tid&forumScope=mooc
+    → 主题详情、capabilities.{canReply,...}、回复列表
+```
+
+`lid`（按单元过滤）传任何值都返回 `-100 请求参数错误`，**尚未解开**；不过做讨论任务不需要它。
+
+### 7.5 剩余风险
+
+- 回复是**公开内容**：按各主题写一句课程相关的真实回答，不要重复或灌水
+- 需要浏览器 cookie：实现时复用 `npm run login` 存下的浏览器会话，或由用户临时提供
+- 进度：**1/57**（机制已验证），其余 56 个待执行
 
 ---
 
