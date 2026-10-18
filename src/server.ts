@@ -80,6 +80,7 @@ const SUBMIT_HOMEWORK_DESCRIPTION = [
   "Default workflow must use save_homework_answers (draft) first; do not submit without user confirmation.",
   "Args: todo_id; answers[{question_id, option_ids?, text?}]; optional paper_type; optional school_short_name.",
   "Posts mocQuizRpcBean.submitAnswers with preview=false. Refuses exam source todo_ids (考试代交不做).",
+  "For a unit-source quiz (a 随堂测试 that is its own unit) it ALSO reports that unit's task point via saveMocContentLearn contentType=5, because submitAnswers alone grades the paper without marking the outline entry done; the result then carries task_point: marked|failed|skipped.",
   "No cookies/passwords.",
 ].join(" ");
 

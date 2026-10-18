@@ -764,3 +764,98 @@ describe("issue #32 unit-id fallback and preview reject", () => {
     }
   });
 });
+
+// Measured bug: a unit-level 随堂测试 (contentType 5) is graded by submitAnswers, but its task
+// point is a separate report. Without it the outline keeps showing the test as undone -- a fully
+// answered quiz stayed at completePercent 0 / viewStatus 0 until one saveMocContentLearn with
+// contentType 5 was sent (observed on unit 1322018145, which then flipped to 1 / viewStatus 5).
+describe("unit quiz task point", () => {
+  const UNIT_TODO = "1001:2001:unit:555";
+  const CATALOG = {
+    chapters: [
+      {
+        quizs: [{ id: 301, name: "章节测验", contentId: 301, test: { id: 301 } }],
+        lessons: [
+          {
+            id: 777,
+            name: "lesson",
+            units: [
+              { id: 555, name: "随堂测试", contentType: 5, contentId: 301, completePercent: 0 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  test("marks the task point after a unit quiz is submitted", async () => {
+    const { calls, http } = recordingHttp((input) => {
+      const warm = warmupOk(input);
+      if (warm) {
+        return warm;
+      }
+      if (input.url.startsWith(TERM_RPC_URL)) {
+        return { statusCode: 200, body: mocTermBody(CATALOG) };
+      }
+      if (input.url.startsWith(QUIZ_PAPER_RPC_URL)) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: SAMPLE_PAPER }) };
+      }
+      if (input.url.startsWith(SUBMIT_ANSWERS_RPC_URL)) {
+        assert.equal((input.json as { preview: boolean }).preview, false);
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { score: 10 } }) };
+      }
+      if (input.url.includes("saveMocContentLearn")) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0 }) };
+      }
+      throw new Error(`unexpected ${input.url}`);
+    });
+
+    const result = await submitHomework(
+      { todo_id: UNIT_TODO, answers: [{ question_id: "11", option_ids: ["102"] }] },
+      portsWith(async () => SESSION, http),
+    );
+
+    assert.equal(result.isError, false);
+    assert.equal(result.submitted, true);
+    assert.equal(result.task_point, "marked");
+
+    const learn = calls.filter((c) => c.url.includes("saveMocContentLearn"));
+    assert.equal(learn.length, 1);
+    const dto = JSON.parse(String((learn[0] as { raw?: string }).raw ?? "{}")).dto as Record<
+      string,
+      unknown
+    >;
+    assert.equal(dto.contentType, 5);
+    assert.equal(dto.unitId, 555);
+    assert.equal(dto.lessonId, 777);
+    assert.equal(dto.finished, true);
+  });
+
+  test("does not report a task point for a chapter quiz", async () => {
+    const { calls, http } = recordingHttp((input) => {
+      const warm = warmupOk(input);
+      if (warm) {
+        return warm;
+      }
+      if (input.url.startsWith(TERM_RPC_URL)) {
+        return { statusCode: 200, body: mocTermBody(CATALOG) };
+      }
+      if (input.url.startsWith(QUIZ_PAPER_RPC_URL)) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: SAMPLE_PAPER }) };
+      }
+      if (input.url.startsWith(SUBMIT_ANSWERS_RPC_URL)) {
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { score: 10 } }) };
+      }
+      throw new Error(`unexpected ${input.url}`);
+    });
+
+    const result = await submitHomework(
+      { todo_id: "1001:2001:quiz:301", answers: [{ question_id: "11", option_ids: ["102"] }] },
+      portsWith(async () => SESSION, http),
+    );
+
+    assert.equal(result.submitted, true);
+    assert.equal(result.task_point, "skipped");
+    assert.equal(calls.filter((c) => c.url.includes("saveMocContentLearn")).length, 0);
+  });
+});

@@ -5,6 +5,7 @@ import {
   resolveSession,
   type ToolError,
 } from "./course-rpc";
+import { buildDocLearnReport, findUnitInMocTerm, saveLearnDto } from "./study-unit";
 import {
   asArray,
   asFiniteNumber,
@@ -135,6 +136,15 @@ export type SubmitHomeworkResult = {
   preview: false;
   submitted: boolean;
   results: SaveAnswerItemResult[];
+  /**
+   * Unit-level quizzes (`contentType 5`, i.e. a 随堂测试 that is its own unit) carry a task point
+   * that `submitAnswers` does not touch: answers get graded but the unit stays at
+   * completePercent 0 / viewStatus 0, so the outline still shows it as undone.
+   *
+   * "marked" = the follow-up learn report went through; "failed" = it did not (details in
+   * errors); "skipped" = not a unit-source quiz, or no ports available to report with.
+   */
+  task_point?: "marked" | "failed" | "skipped";
   errors: ToolError[];
 };
 
@@ -439,7 +449,7 @@ export async function submitHomework(
     };
   }
   const saved = await persistAnswers(args, ports, { preview: false });
-  return {
+  const result: SubmitHomeworkResult = {
     isError: saved.isError,
     status: saved.status === "ok" ? "submitted" : saved.status,
     todo_id: saved.todo_id,
@@ -448,6 +458,98 @@ export async function submitHomework(
     results: saved.results,
     errors: saved.errors,
   };
+
+  // A unit-level quiz (contentType 5) needs a SECOND, separate report before the outline marks
+  // it done. Leaving this out is why a fully-answered 随堂测试 still showed 0%: `submitAnswers`
+  // grades the paper but never touches the unit's task point.
+  if (result.submitted && parsed?.source === "unit") {
+    result.task_point = await markUnitTaskPoint({
+      args,
+      ports,
+      parsed,
+      errors: result.errors,
+    });
+  } else {
+    result.task_point = "skipped";
+  }
+  return result;
+}
+
+/**
+ * Report the task point for a unit-level quiz.
+ *
+ * Measured on unit 1322018145 (现代田径运动的发展特点-随堂测试): after a successful
+ * `submitAnswers` the unit was still `completePercent 0 / viewStatus 0`; one
+ * `saveMocContentLearn` with `contentType: 5` flipped it to `1 / 5`. Nothing else changed, and
+ * no other field differs between a completed and an incomplete copy of the same quiz.
+ */
+async function markUnitTaskPoint(input: {
+  args: SaveHomeworkArgs;
+  ports: Icourse163Ports | undefined;
+  parsed: NonNullable<ReturnType<typeof parseTodoId>>;
+  errors: ToolError[];
+}): Promise<"marked" | "failed"> {
+  const ports = input.ports;
+  if (ports == null) {
+    input.errors.push({
+      where: "task_point",
+      message: "答案已提交，但没有可用的 HTTP 端口来上报任务点，页面可能仍显示未完成",
+    });
+    return "failed";
+  }
+  const session = await resolveSession(ports);
+  if (!session.ok) {
+    input.errors.push({
+      where: "task_point",
+      message: "答案已提交，但会话读取失败，任务点未上报（页面可能仍显示未完成）",
+    });
+    return "failed";
+  }
+  const course = {
+    course_id: input.parsed.course_id,
+    term_id: input.parsed.term_id,
+    school_short_name: input.args.school_short_name?.trim() ?? "",
+  };
+  const unitId = input.parsed.content_id;
+
+  const moc = await fetchMocTermDto({
+    http: ports.http,
+    cookie: session.cookie,
+    csrfKey: session.csrfKey,
+    course,
+  });
+  const located = moc == null ? null : findUnitInMocTerm(moc, unitId);
+  if (located?.lesson_id == null) {
+    input.errors.push({
+      where: "task_point",
+      message: "答案已提交，但课程目录里定位不到该单元所属课时，任务点未上报",
+    });
+    return "failed";
+  }
+
+  const dto = buildDocLearnReport({
+    course_id: course.course_id,
+    term_id: course.term_id,
+    lesson_id: located.lesson_id,
+    unit_id: unitId,
+    content_type: 5,
+    page_count: null,
+  });
+  const saved = await saveLearnDto({
+    http: ports.http,
+    cookie: session.cookie,
+    csrfKey: session.csrfKey,
+    referer: learnReferer(course),
+    dto,
+  });
+  if (saved.kind === "saved") {
+    return "marked";
+  }
+  input.errors.push({
+    where: "task_point",
+    message: `答案已提交，但任务点上报失败（页面可能仍显示未完成）：${saved.message}`,
+  });
+  return "failed";
 }
 
 type PersistResult = {
