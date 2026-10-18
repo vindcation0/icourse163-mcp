@@ -2,7 +2,7 @@
 
 本仓库根目录就是给 Grok Bot / Cursor 用的本机 stdio MCP。体验对齐 [K4F7/chaoxing-mcp](https://github.com/K4F7/chaoxing-mcp) / [K4F7/pu-mcp](https://github.com/K4F7/pu-mcp)：一个进程、stdio、凭据不进工具参数。
 
-工具含 `list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`、`session_status`。登录只走 CLI，见 [docs/login.md](login.md)。MCP 从不接收或返回 cookie / 密码。
+工具含 `list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`solve_quiz`、`list_discussion_units`、`reply_discussion`、`save_homework_answers`、`submit_homework`、`session_status`。登录只走 CLI，见 [docs/login.md](login.md)。MCP 从不接收或返回 cookie / 密码。
 
 产品目标对齐 OCS 学习自动化（自动看课、测验/作业辅助；**考试代交不做**），详见仓库根 [README](../README.md)。答卷流水线：`read` → AI 填答 → **`save` 必调（草稿）** → 用户确认后才显式 `submit`（默认不交）。实现可用 RPC 或 DOM/Playwright（或混合），由后续 issue 细化。
 
@@ -210,3 +210,37 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - **显式正式提交（opt-in）**。仅在用户确认后调用；默认工作流只用 `save_homework_answers`。
 - 内部 `submitAnswers` 且 **`preview: false`**。`source=exam` 的 `todo_id` 直接 `exam_out_of_scope`（考试代交不做）。
 - 入参同 save。不要传账号或 cookie。
+
+## `solve_quiz`
+
+- 两段式作答：**先用试卷自带的答案**，剩下的才问题库。默认 **dry run**（`submit` 必须显式传 true）。
+- 单元级随堂测试（`contentType=5`）在提交前就返回 `optionDtos[].answer` 与填空题的 `stdAnswer`
+  （`showAnalysis:false` 只是界面不显示）。章节测验**不**返回，所以只有它们需要题库。
+- 入参：`todo_id`；可选 `tiku_config`（OCS `AnswererWrapper` 兼容的 JSON 数组）、
+  `submit`（默认 false）、`min_coverage`（默认 0.8）、`paper_type`、`school_short_name`。
+- 拒绝提交的情形：没有答案且没有题库、命中率低于 `min_coverage`、目录显示作答次数已用完、`exam` 来源。
+- 题库**收不到任何 cookie**：走独立 fetch（`credentials: omit`），不走带会话的 HTTP 客户端。
+- `attempts` 即使 dry run 也会返回 —— 调用方要靠它决定是否花掉一次机会。随堂测试没有次数字段，如实返回 null。
+
+## `list_discussion_units`
+
+- 只读。走**新版 Next.js API**（`/front-mooc-learn/api/learn/*`），**不是** `/api/learn/*`（那个 404）。
+- 鉴权：读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`。
+  **不认** `npm run login` 的会话（那份对这些端点必然 401），也不会回退过去。
+- 入参：`course_id`、`term_id`、可选 `school_short_name`。
+- 返回每个讨论单元的 `unit_id`、`lesson_id`、`content_id`（**就是老师创建的主题 id**）、
+  `view_status`、`complete_percent`、`completed`。
+- 注意：`content-outline` **不返回 `completePercent`**，完成状态在 `viewStatus`
+  （`completed` / `not-viewed`）。`completed` 两个信号都认。
+
+## `reply_discussion`
+
+- **回复该单元自己的主题** —— 这一步就是完成该任务点：实测 `completePercent` 0→1、
+  `viewStatus` 0→5，一次调用，不需要额外进度上报。
+- **新建帖子不行**：`createOrUpdatePost` 即使带 `lessonUnitId`，服务端也会丢弃该字段（读回是
+  `null`），任务点不动。不要用它刷任务点。
+- 调用方只传 `unit_id`；`content_id` 由服务器从 `content-outline` 自己解析，避免传错。
+- 单元已完成时返回 `already_complete` 并**拒绝重发** —— 回复是公开内容，不能重复留痕。
+- 入参：`course_id`、`term_id`、`unit_id`、`content`（要针对该主题，不要灌水）、可选 `school_short_name`。
+- 状态码：`ok`、`already_complete`、`no_session`（cookie 缺失或 401）、`unit_not_found`、
+  `not_a_discussion`、`http_error`、`rejected`（内容为空）。

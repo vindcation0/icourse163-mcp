@@ -79,7 +79,8 @@ npm run check:rpc --silent -- --course-id 1450750234 --term-id 1475848441 --scho
 **已知的产品选择**：密码输入**默认可见**（`--hide-password` 可关闭）—— 按使用者要求定的，
 README 里如实标注了代价（回显会留在终端回滚区/录屏里）。
 
-**MCP 工具共 8 个**：`list_todos`、`session_status`、`list_courses`、`list_term_units`、
+**MCP 工具共 11 个**：`list_todos`、`session_status`、`list_courses`、`list_term_units`、
+`solve_quiz`、`list_discussion_units`、`reply_discussion`、
 `study_unit`、`get_homework`、`save_homework_answers`、`submit_homework`。
 
 ---

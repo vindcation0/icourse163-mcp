@@ -9,7 +9,7 @@
 ## 0. 30 秒摘要
 
 **这是什么**：中国大学MOOC（icourse163.org）的本机工具，两条入口共用同一个引擎 ——
-`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，8 个工具）。
+`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，11 个工具）。
 
 **一句话现状**：
 > **登录、刷课、读题、答题提交、讨论区回复 —— 全部纯 HTTP 可用且已实测。**
@@ -39,11 +39,14 @@
 | 列课程/课件 | 纯 HTTP | `mooc.py courses/units`、MCP | 8 门课 |
 | **读试卷** | **纯 HTTP** | MCP `get_homework` | 作业 0.5s、测验 3.0s |
 | **提交答案** | **纯 HTTP** | MCP `submit_homework` | **8/8 满分**，1.3 秒 |
+| **随堂测试全自动** | 纯 HTTP | MCP `solve_quiz` | 试卷自带答案，**57/57 已完成** |
+| **讨论区回复** | 纯 HTTP（需浏览器 cookie） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，1/57 已验证 |
 | 会话体检 | 纯 HTTP | `mooc.py status` / MCP `session_status` | ~2 秒 |
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
 
-**8 个 MCP 工具里 7 个是纯 HTTP**；只有 `study_unit` 可能碰浏览器（见 §5 危险动作）。
+**11 个 MCP 工具里 9 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
+讨论区两个工具需要**浏览器登录的 cookie**（但请求本身仍是纯 HTTP）。
 
 ---
 
@@ -233,7 +236,7 @@ python mooc.py auto       # 刷课（--transport 默认 rpc，绝不回退浏览
 python mooc.py settings
 
 # agent 用
-npm start --silent        # stdio MCP 服务器（8 个工具）
+npm start --silent        # stdio MCP 服务器（11 个工具）
 
 # 打包 / 发布
 python scripts/build-exe.py     # → dist/mooc/mooc.exe
@@ -259,7 +262,7 @@ python tests/mooc_menus_test.py              # 菜单桩测试，13 组全过
 | **STATUS.md**（本文） | 接手入口：现状、结论、边界、危险动作 |
 | [ROADMAP.md](ROADMAP.md) | 优先级、代价表、依赖图、待拍板决策 |
 | [HANDOFF.md](HANDOFF.md) | 逆向硬事实、踩坑史（含三次误读同一个错误码的教训） |
-| [mcp.md](mcp.md) | 8 个工具的契约与状态码语义 |
+| [mcp.md](mcp.md) | 11 个工具的契约与状态码语义 |
 | [login.md](login.md) | 登录细节（纯 HTTP / 浏览器 / cookie 粘贴） |
 | [adr/](adr/) | 5 份架构决策记录（RPC 签名、URS 登录、作业 RPC 等） |
 

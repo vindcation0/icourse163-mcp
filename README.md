@@ -6,7 +6,7 @@
 - **stdio MCP 服务器** —— 给 AI agent 用的一套工具
 
 **登录和刷课都不需要浏览器。** 登录走纯 HTTP（约 4 秒），刷课走签名 RPC（约 1.4 秒/单元），
-读题与答卷提交同样是纯 HTTP（8 个 MCP 工具里 7 个完全不用浏览器）。
+读题与答卷提交同样是纯 HTTP（11 个 MCP 工具里 9 个完全不用浏览器）。
 
 **唯一的例外**：`mooc.py` 的 `--transport` 默认 `rpc`，绝不回退浏览器；但 MCP 的 `study_unit`
 默认 `transport=auto`，遇到 `-10006` / 限流 / 时钟类错误会**自动尝试启动 Chrome**。
@@ -166,7 +166,7 @@ npm run login:http --silent -- --channel phone  # 纯 HTTP 通道
 npm run login --silent -- --check              # 体检
 ```
 
-### 工具（共 8 个）
+### 工具（共 11 个）
 
 | 工具 | 作用 |
 |---|---|
@@ -178,6 +178,9 @@ npm run login --silent -- --check              # 体检
 | `get_homework` | 读题（解析 catalog id → 试卷 `contentId`） |
 | `save_homework_answers` | **必调**：存草稿（`preview=true`），不可能正式提交 |
 | `submit_homework` | 仅在你明确确认后调用；拒绝 exam 类 todo |
+| `solve_quiz` | 读题 → 查题库/用试卷自带答案 → （可选）提交；默认只出清单不提交 |
+| `list_discussion_units` | 列出讨论单元（`content_id` = 主题 id）；需**浏览器登录**的 cookie |
+| `reply_discussion` | 回复该单元的主题即完成任务点；已完成则拒绝重发 |
 
 `status: ok` 且列表为空表示**确实没有**，不是失败；认证失效是 `auth_expired`（`isError`），
 不会被伪装成空成功。
