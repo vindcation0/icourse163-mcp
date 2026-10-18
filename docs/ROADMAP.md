@@ -365,6 +365,7 @@ GET /api/learn/forum/detail?courseKey&page&pid&sort&tid&forumScope=mooc
 - ~~需要浏览器 cookie~~ → ✅ **已解决**：`login` 工具（有头浏览器）成功后自动写 `browser-session`。
   实测 `followedStatus` 由 `UNAUTHENTICATED` 变 `AVAILABLE`，无需手抄。**必须用有头模式**，无头取到的会话新 API 不认
 - 进度：**1/57**（机制已验证），其余 56 个待执行
+- 会话已就绪：`login` 工具跑过一次即写好 `browser-session`，批量执行不需要再提供任何凭据
 
 ---
 

@@ -12,7 +12,9 @@
 `mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，12 个工具）。
 
 **一句话现状**：
-> **登录、刷课、读题、答题提交、讨论区回复 —— 全部纯 HTTP 可用且已实测。**
+> **登录、刷课、读题、答题提交、讨论区回复 —— 全部可用且已实测；除 `study_unit` 的浏览器回退外都是纯 HTTP。**
+> 登录有两条路：CLI（`mooc.py login` / `npm run login`）和 MCP **`login` 工具**（弹有头浏览器，不收密码参数）。
+> 讨论区要的浏览器会话由 `login` 工具**自动写入**，实测 `followedStatus` 变 `AVAILABLE`，不需要手抄。
 > 讨论区工具已实现。考试提交**默认关闭**，需显式 `allow_exam: true`。
 > 剩下的是工作量，不是未知。
 
@@ -32,7 +34,7 @@
 
 | 能力 | 通道 | 入口 | 实测 |
 |---|---|---|---|
-| 登录 | 纯 HTTP（URS：SM4+RSA+VDF） | `mooc.py login` / exe 首次运行 | ~4 秒 |
+| 登录 | 纯 HTTP（URS：SM4+RSA+VDF） | `mooc.py login` / exe 首次运行 / MCP `login`（有头浏览器） | CLI ~4 秒；`login` 工具 ~15 秒并顺带写 `browser-session` |
 | 刷视频/文档 | **签名 RPC** | `mooc.py auto` / MCP `study_unit` | ~1.4 秒/单元 |
 | 分块上报（可选） | 签名 RPC | `--chunk 60` | 337s 单元 → 6 段，153 秒 |
 | 列待办 | 纯 HTTP | MCP `list_todos` | 159 个（测验 137 / 作业 21 / 考试 1） |
@@ -40,7 +42,7 @@
 | **读试卷** | **纯 HTTP** | MCP `get_homework` | 作业 0.5s、测验 3.0s |
 | **提交答案** | **纯 HTTP** | MCP `submit_homework` | **8/8 满分**，1.3 秒 |
 | **随堂测试全自动** | 纯 HTTP | MCP `solve_quiz` | 试卷自带答案，**57/57 已完成** |
-| **讨论区回复** | 纯 HTTP（需浏览器 cookie） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，1/57 已验证 |
+| **讨论区回复** | 纯 HTTP（需浏览器会话，`login` 工具自动生成） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，1/57 已验证 |
 | 会话体检 | 纯 HTTP | `mooc.py status` / MCP `session_status` | ~2 秒 |
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
