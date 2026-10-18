@@ -124,12 +124,12 @@ describe("file credential store", () => {
 
   test("defaultSessionFilePath prefers XDG_CONFIG_HOME", () => {
     assert.equal(
-      defaultSessionFilePath({ XDG_CONFIG_HOME: "/tmp/xdg-config" }, "/home/user"),
-      "/tmp/xdg-config/icourse163-mcp/session",
+      defaultSessionFilePath({ XDG_CONFIG_HOME: join("/tmp", "xdg-config") }, join("/home", "user")),
+      join("/tmp", "xdg-config", "icourse163-mcp", "session"),
     );
     assert.equal(
-      defaultSessionFilePath({}, "/home/user"),
-      "/home/user/.config/icourse163-mcp/session",
+      defaultSessionFilePath({}, join("/home", "user")),
+      join("/home", "user", ".config", "icourse163-mcp", "session"),
     );
   });
 

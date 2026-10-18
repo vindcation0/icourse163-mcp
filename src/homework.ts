@@ -57,6 +57,14 @@ import { resolvePaperTarget } from "./paper-resolve";
 export type HomeworkOption = {
   id: string;
   content: string;
+  /**
+   * Whether the platform marks this option as correct.
+   *
+   * Unit-level 随堂测试 (`contentType 5`) return `optionDtos[].answer` **before submission**, so the
+   * correct choice is readable straight off the paper. Chapter quizzes (`chapters.quizs`) do not:
+   * measured 0/10 questions carried the flag. `undefined` means the field was absent.
+   */
+  correct?: boolean;
 };
 
 export type HomeworkQuestion = {
@@ -68,6 +76,12 @@ export type HomeworkQuestion = {
   stem_text: string | null;
   options: HomeworkOption[];
   current_answer: string | null;
+  /**
+   * The platform's standard answer text, when it exposes one. Fill-in questions (type 3) on
+   * unit-level quizzes carry it before submission (e.g. "最后用力"), which makes them answerable
+   * without any question bank. Chapter quizzes do not.
+   */
+  std_answer?: string | null;
   supports_save: boolean;
   bank: "objective" | "subjective";
 };
@@ -301,11 +315,14 @@ export function parsePaperQuestions(
       const content =
         stripHtml(asNonEmptyString(opt.content) ?? asNonEmptyString(opt.title)) ??
         "";
-      options.push({ id: optId, content });
+      // Unit-level 随堂测试 expose which option is correct; chapter quizzes do not.
+      const correct = typeof opt.answer === "boolean" ? opt.answer : undefined;
+      options.push(correct === undefined ? { id: optId, content } : { id: optId, content, correct });
     }
     const current =
       asNonEmptyString(q.answer) ??
       (Array.isArray(q.stdAnswer) ? null : asNonEmptyString(q.stdAnswer));
+    const stdAnswer = Array.isArray(q.stdAnswer) ? null : asNonEmptyString(q.stdAnswer);
     questions.push({
       index,
       question_id: questionId,
@@ -315,6 +332,7 @@ export function parsePaperQuestions(
       stem_text: stripHtml(titleRaw),
       options,
       current_answer: current,
+      std_answer: stdAnswer == null ? null : (stripHtml(stdAnswer) ?? stdAnswer),
       supports_save: true,
       bank: "objective",
     });
@@ -748,6 +766,29 @@ async function persistAnswers(
         question_id: qid,
         status: "failed",
         message: "未找到对应题目",
+      });
+      continue;
+    }
+    if (question.type === 3) {
+      const text = answer.text?.trim() ?? "";
+      if (text.length === 0) {
+        results.push({
+          question_id: qid,
+          status: "rejected",
+          message: "填空题需要 text",
+        });
+        continue;
+      }
+      builtAnswers.push({
+        qid: Number(qid),
+        type: 3,
+        fillAnswers: [text],
+        time: Math.floor(Date.now() / 1000),
+      });
+      results.push({
+        question_id: qid,
+        status: "saved",
+        message: mode.preview ? "草稿已写入待提交包" : "已写入提交包",
       });
       continue;
     }

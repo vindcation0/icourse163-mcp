@@ -52,9 +52,11 @@ export type SolvedQuestion = {
   type_label: string;
   title: string;
   options: { id: string; content: string }[];
-  /** 题库返回的原始答案文本。 */
+  /** 答案原文（来自试卷或题库）。 */
   answer: string | null;
   answerer: string | null;
+  /** paper = 平台自己给的答案；tiku = 题库给的；null = 没答上。 */
+  source: "paper" | "tiku" | null;
   /** 落到提交载荷里的字段。 */
   option_ids: string[];
   text: string | null;
@@ -161,8 +163,33 @@ export async function solveQuiz(
   const questions = hw.questions ?? [];
   const solved: SolvedQuestion[] = questions.map((q) => toSolved(q));
 
+  // ① 试卷自带答案优先。随堂测试（contentType 5）在**提交前**就返回
+  //    `optionDtos[].answer` 与填空题的 `stdAnswer`，所以这类卷子根本不需要题库；
+  //    章节测验不返回这些字段（实测 0/10），走 ②。
+  for (const [index, question] of solved.entries()) {
+    const platformQuestion = questions[index];
+    if (platformQuestion == null) {
+      continue;
+    }
+    const fromPaper = answerFromPaper(platformQuestion);
+    if (fromPaper == null) {
+      continue;
+    }
+    question.answer = fromPaper.answer;
+    question.source = "paper";
+    if (fromPaper.option_ids.length > 0) {
+      question.option_ids = fromPaper.option_ids;
+    } else if (fromPaper.text != null) {
+      question.text = fromPaper.text;
+    }
+  }
+
+  // ② 剩下的才问题库。
   if (config.length > 0) {
     for (const [index, question] of solved.entries()) {
+      if (question.option_ids.length > 0 || (question.text != null && question.text !== "")) {
+        continue; // 试卷已经给了答案
+      }
       const platformType = questions[index]?.type ?? null;
       const type = mapQuestionType(platformType);
       question.type = type;
@@ -182,6 +209,7 @@ export async function solveQuiz(
       }
       question.answer = lookup.answer;
       question.answerer = lookup.answerer;
+      question.source = "tiku";
       question.note = lookup.note;
       if (question.options.length > 0) {
         // 选择题/判断题：把答案文本匹配回选项 id（实测最可靠）
@@ -214,10 +242,11 @@ export async function solveQuiz(
   };
 
   if (args.submit !== true) {
-    return { ...result, status: config.length === 0 ? "no_tiku" : "dry_run" };
+    // 有试卷自带答案时，没有题库也不算"缺少题库"
+    return { ...result, status: config.length === 0 && answered === 0 ? "no_tiku" : "dry_run" };
   }
-  if (config.length === 0) {
-    return { ...result, status: "no_tiku", isError: true, errors: [{ where: "tiku_config", message: "没有题库配置，拒绝提交（只读模式下不会自动作答）" }] };
+  if (config.length === 0 && answered === 0) {
+    return { ...result, status: "no_tiku", isError: true, errors: [{ where: "tiku_config", message: "没有题库配置，而且试卷没给出答案，拒绝提交" }] };
   }
   if (coverage < minCoverage) {
     return {
@@ -270,18 +299,39 @@ export async function solveQuiz(
   };
 }
 
+/**
+ * Answer straight from the paper when the platform exposes it.
+ *
+ * Unit-level 随堂测试 return the correctness flag per option and the standard answer for fill-ins
+ * **before submission**; chapter quizzes do not. Reading these is not a shortcut or a heuristic —
+ * it is the platform's own data, and it is what let the whole 随堂测试 set be finished without
+ * configuring any question bank.
+ */
+function answerFromPaper(q: HomeworkQuestion): { answer: string; option_ids: string[]; text: string | null } | null {
+  const correct = (q.options ?? []).filter((o) => o.correct === true);
+  if (correct.length > 0) {
+    return { answer: correct.map((o) => o.content).join("#"), option_ids: correct.map((o) => o.id), text: null };
+  }
+  const std = (q.std_answer ?? "").trim();
+  if (std !== "") {
+    return { answer: std, option_ids: [], text: std };
+  }
+  return null;
+}
+
 function toSolved(q: HomeworkQuestion): SolvedQuestion {
   const options = (q.options ?? []).map((o) => ({ id: o.id, content: o.content }));
   const title = (q.stem_text ?? q.title ?? "").trim();
   return {
     index: q.index,
     question_id: q.question_id,
-    type: "unknown",
+    type: mapQuestionType(q.type),
     type_label: q.type_label ?? "",
     title,
     options,
     answer: null,
     answerer: null,
+    source: null,
     option_ids: [],
     text: null,
     note: null,

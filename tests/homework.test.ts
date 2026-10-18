@@ -366,6 +366,53 @@ describe("saveHomeworkAnswers / submitHomework", () => {
     assert.ok(calls.some((c) => c.url.startsWith(SUBMIT_ANSWERS_RPC_URL)));
   });
 
+  test("supports fill-in-the-blank (type 3) answers", async () => {
+    const { calls, http } = recordingHttp((input) => {
+      const warmed = warmupOk(input);
+      if (warmed) return warmed;
+      const term = termEmptyOk(input);
+      if (term) return term;
+      if (input.url.startsWith(QUIZ_PAPER_RPC_URL)) {
+        return {
+          statusCode: 200,
+          body: paperBody({
+            aid: 90001,
+            tid: 301,
+            tname: "填空测验",
+            objectiveQList: [
+              { id: 31, type: 3, title: "<p>田径起源于____</p>", optionDtos: [] },
+            ],
+            subjectiveQList: [],
+          }),
+        };
+      }
+      if (input.url.startsWith(SUBMIT_ANSWERS_RPC_URL)) {
+        const body = input.json as {
+          preview?: unknown;
+          paperDto?: { answers?: Array<{ qid: number; type: number; fillAnswers?: string[]; time?: number }> };
+        };
+        assert.equal(body.preview, false);
+        assert.equal(body.paperDto?.answers?.[0]?.qid, 31);
+        assert.equal(body.paperDto?.answers?.[0]?.type, 3);
+        assert.deepEqual(body.paperDto?.answers?.[0]?.fillAnswers, ["走跑跳投"]);
+        assert.ok(typeof body.paperDto?.answers?.[0]?.time === "number");
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { score: 10 } }) };
+      }
+      throw new Error(`unexpected ${input.url}`);
+    });
+
+    const result = await submitHomework(
+      {
+        todo_id: TODO_QUIZ,
+        answers: [{ question_id: "31", text: "走跑跳投" }],
+      },
+      portsWith(async () => SESSION, http),
+    );
+    assert.equal(result.isError, false);
+    assert.equal(result.status, "submitted");
+    assert.equal(result.results[0].status, "saved");
+  });
+
   test("save does not mark submitted even on success", async () => {
     const { http } = recordingHttp((input) => {
       const warmed = warmupOk(input);
