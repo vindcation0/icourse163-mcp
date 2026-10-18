@@ -316,6 +316,23 @@ POST /front-mooc-learn/api/learn/forum/write
 **语义关键**：讨论任务 = "回复那节课的主题"，不是"新建一个帖子"。主题由老师创建（例：
 「谈一谈你对现在田径运动的发展特点及趋势的认识」），单元 `contentId` 就是主题 id。
 
+**第四个坑（做代码时踩到的）**：新版 `content-outline` **不返回 `completePercent`**，
+完成状态只在 `viewStatus` 里 —— 已回复的是 `"completed"`，未看的是 `"not-viewed"`。
+旧版 `mocTermDto` 那条路才有 `completePercent`。只认 `completePercent` 会让幂等闸门失效、
+对同一个主题重复发帖。
+
+### 7.2b 已实现（2026-10-18）
+
+`src/discussion.ts` + 两个 MCP 工具，已 live 验证：
+
+| 工具 | 作用 |
+|---|---|
+| `list_discussion_units` | 读 `content-outline`，列出讨论单元（`content_id` = 主题 id、`view_status`、`completed`） |
+| `reply_discussion` | 回复单元的主题；`already_complete` 时**拒绝重发**（回复是公开内容） |
+
+鉴权：读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`
+（**不是** `npm run login` 那份会话）。工具不接受 cookie/密码参数。
+
 ### 7.3 API 基址与鉴权（最容易踩的坑）
 
 - 基址是 **`/front-mooc-learn/api/learn/*`**，**不是** `/api/learn/*`（后者 404）

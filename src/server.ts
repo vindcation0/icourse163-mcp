@@ -11,6 +11,7 @@ import { listTermUnits } from "./list-term-units";
 import { listTodos } from "./list-todos";
 import type { Icourse163Ports } from "./ports";
 import { sessionStatus } from "./session-status";
+import { createBrowserSessionStore, listDiscussionUnits, replyDiscussion } from "./discussion";
 import { solveQuiz } from "./solve-quiz";
 import { studyUnit } from "./study-unit";
 
@@ -85,6 +86,21 @@ const SUBMIT_HOMEWORK_DESCRIPTION = [
   "No cookies/passwords.",
 ].join(" ");
 
+const DISCUSSIONS_DESCRIPTION = [
+  "List the discussion units of a course/term (read-only).",
+  "Uses the site's newer Next.js API (/front-mooc-learn/api/learn/*), which requires a BROWSER login cookie — the npm run login session is rejected by it with 401. The cookie is read from ~/.config/icourse163-mcp/browser-session or ICOURSE163_BROWSER_COOKIE; tools never take cookies or passwords as arguments.",
+  "Args: course_id; term_id; optional school_short_name.",
+  "Returns each unit's unit_id, lesson_id, content_id (which is the teacher's topic id) and complete_percent.",
+].join(" ");
+
+const REPLY_DISCUSSION_DESCRIPTION = [
+  "Reply to a discussion unit's own topic. On this platform that reply IS what completes the unit: measured completePercent 0→1 and viewStatus 0→5 in a single call, with no extra progress report.",
+  "Creating a standalone post does NOT work even when lessonUnitId is supplied — the server drops that field and returns null — so do not use it for task points.",
+  "Refuses when the unit is already complete, because replies are public content and must not be duplicated. Resolves content_id from the course outline itself; callers only pass unit_id.",
+  "Same auth requirement as list_discussion_units: a browser login cookie, never the npm run login session.",
+  "Args: course_id; term_id; unit_id; content (the reply text, must be specific to that topic, not filler).",
+].join(" ");
+
 const SOLVE_QUIZ_DESCRIPTION = [
   "Read a quiz/homework paper, query a question bank for each question, and optionally submit.",
   "Read + submit are verified over plain HTTP (no browser, no request signing). Session cookies never leave for the bank: the bank call uses a separate fetch with credentials omitted.",
@@ -108,6 +124,9 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
     name: "icourse163-mcp",
     version: "0.1.0",
   });
+
+  // 讨论区走的是新版 API，只认浏览器登录的会话 —— 与工具自己的 URS 会话分开存放。
+  const browserSession = createBrowserSessionStore();
 
   server.registerTool(
     "list_todos",
@@ -383,6 +402,62 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           school_short_name: args.school_short_name,
         },
         ports,
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "list_discussion_units",
+    {
+      title: "List discussion units (needs browser session)",
+      description: DISCUSSIONS_DESCRIPTION,
+      inputSchema: {
+        course_id: z.string().describe("Course id, e.g. 1449647163"),
+        term_id: z.string().describe("Term id, e.g. 1488389457"),
+        school_short_name: z.string().optional().describe("School short name, e.g. CUPES"),
+      },
+    },
+    async (args) => {
+      const result = await listDiscussionUnits(
+        { course_id: args.course_id, term_id: args.term_id, school_short_name: args.school_short_name },
+        { browserCookie: () => browserSession.getCookie() },
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "reply_discussion",
+    {
+      title: "Reply to a discussion unit's topic",
+      description: REPLY_DISCUSSION_DESCRIPTION,
+      inputSchema: {
+        course_id: z.string().describe("Course id"),
+        term_id: z.string().describe("Term id"),
+        unit_id: z.string().describe("Discussion unit id (contentType 6)"),
+        content: z.string().describe("Reply text, specific to that unit's topic"),
+        school_short_name: z.string().optional().describe("School short name"),
+      },
+    },
+    async (args) => {
+      const result = await replyDiscussion(
+        {
+          course_id: args.course_id,
+          term_id: args.term_id,
+          unit_id: args.unit_id,
+          content: args.content,
+          school_short_name: args.school_short_name,
+        },
+        { browserCookie: () => browserSession.getCookie() },
       );
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
