@@ -11,6 +11,7 @@ import { listTermUnits } from "./list-term-units";
 import { listTodos } from "./list-todos";
 import type { Icourse163Ports } from "./ports";
 import { sessionStatus } from "./session-status";
+import { solveQuiz } from "./solve-quiz";
 import { studyUnit } from "./study-unit";
 
 const SESSION_STATUS_DESCRIPTION = [
@@ -82,6 +83,15 @@ const SUBMIT_HOMEWORK_DESCRIPTION = [
   "Posts mocQuizRpcBean.submitAnswers with preview=false. Refuses exam source todo_ids (考试代交不做).",
   "For a unit-source quiz (a 随堂测试 that is its own unit) it ALSO reports that unit's task point via saveMocContentLearn contentType=5, because submitAnswers alone grades the paper without marking the outline entry done; the result then carries task_point: marked|failed|skipped.",
   "No cookies/passwords.",
+].join(" ");
+
+const SOLVE_QUIZ_DESCRIPTION = [
+  "Read a quiz/homework paper, query a question bank for each question, and optionally submit.",
+  "Read + submit are verified over plain HTTP (no browser, no request signing). Session cookies never leave for the bank: the bank call uses a separate fetch with credentials omitted.",
+  "Args: todo_id (from list_todos); tiku_config (JSON array of OCS AnswererWrapper entries); optional submit (default FALSE), min_coverage (default 0.8), paper_type, school_short_name.",
+  "Default behaviour is a dry run: it returns every question with the bank's answer, the matched option ids and the coverage, and writes nothing. Submission happens only with submit:true AND coverage >= min_coverage.",
+  "Refuses exam source todo_ids. Reports attempts read from the course catalog (used/limit/timed) and refuses when attempts are exhausted; note unit-level 随堂测试 have no attempt fields at all, so that check cannot apply to them.",
+  "Objective questions (single/multiple/judgement) are answerable from a bank. Subjective questions are skipped: their type maps to unknown and the result says so, because a bank cannot answer an essay.",
 ].join(" ");
 
 const answerItemSchema = z.object({
@@ -325,6 +335,50 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         {
           todo_id: args.todo_id,
           answers: args.answers,
+          paper_type: args.paper_type,
+          school_short_name: args.school_short_name,
+        },
+        ports,
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "solve_quiz",
+    {
+      title: "Answer a quiz from a question bank (opt-in submit)",
+      description: SOLVE_QUIZ_DESCRIPTION,
+      inputSchema: {
+        todo_id: z.string().describe("list_todos id (non-exam)"),
+        tiku_config: z
+          .string()
+          .optional()
+          .describe(
+            "Question-bank config as JSON: an array of {url,name?,method?,contentType?,headers?,data?,handler}, OCS AnswererWrapper compatible. Placeholders ${title} ${type} ${options} are substituted; handler is evaluated as `return (res) => [question, answer]`.",
+          ),
+        submit: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. Only true actually submits, and only when coverage >= min_coverage. Submitting spends a real attempt; for a 随堂测试 the draft step does not exist at all.",
+          ),
+        min_coverage: z.number().optional().describe("Minimum answered ratio to allow submit (default 0.8)"),
+        paper_type: z.enum(["quiz", "homework"]).optional(),
+        school_short_name: z.string().optional(),
+      },
+    },
+    async (args) => {
+      const result = await solveQuiz(
+        {
+          todo_id: args.todo_id,
+          tiku_config: args.tiku_config,
+          submit: args.submit,
+          min_coverage: args.min_coverage,
           paper_type: args.paper_type,
           school_short_name: args.school_short_name,
         },

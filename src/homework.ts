@@ -186,6 +186,41 @@ export function parseTodoId(todoId: string): ParsedTodoId | null {
   return { course_id, term_id, source, content_id };
 }
 
+/**
+ * Named HTML entities that actually show up in icourse163 stems.
+ *
+ * `&rlm;` / `&lrm;` are bidi marks the platform sprinkles into question text, and they survive
+ * plain tag-stripping: a real stem reads `&rlm;田径项目主要由 等基本能力项目类组成。`. Leaving
+ * them in poisons a question-bank query (the bank sees a different string than the student does),
+ * so they are decoded here and then dropped by the zero-width cleanup below.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  amp: "&",
+  rlm: "\u200F",
+  lrm: "\u200E",
+  zwj: "\u200D",
+  zwnj: "\u200C",
+  shy: "",
+  middot: "·",
+  hellip: "…",
+  mdash: "—",
+  ndash: "–",
+  ldquo: "“",
+  rdquo: "”",
+  lsquo: "‘",
+  rsquo: "’",
+  times: "×",
+  divide: "÷",
+};
+
+/** Zero-width and bidi control characters; invisible, and harmful in a search string. */
+const INVISIBLE_RE = /[\u200B-\u200F\u2060-\u2069\uFEFF\u00AD]/g;
+
 export function stripHtml(html: string | null | undefined): string | null {
   if (html == null) {
     return null;
@@ -194,10 +229,13 @@ export function stripHtml(html: string | null | undefined): string | null {
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/p>/gi, "\n")
     .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex: string) => {
+      try {
+        return String.fromCodePoint(Number.parseInt(hex, 16));
+      } catch {
+        return "";
+      }
+    })
     .replace(/&#(\d+);/g, (_, n) => {
       const code = Number(n);
       // Drop zero-width / bidi markers that clutter stems.
@@ -210,7 +248,13 @@ export function stripHtml(html: string | null | undefined): string | null {
         return "";
       }
     })
-    .replace(/&amp;/g, "&")
+    .replace(/&([a-z]+);/gi, (whole, name: string) => {
+      const key = name.toLowerCase();
+      return key in NAMED_ENTITIES ? NAMED_ENTITIES[key] : whole;
+    })
+    // Anything above that decoded into an invisible marker goes away here.
+    .replace(INVISIBLE_RE, "")
+    .replace(/[ \t]{2,}/g, " ")
     .replace(/\s+\n/g, "\n")
     .replace(/\n\s+/g, "\n")
     .trim();
