@@ -43,6 +43,7 @@
 | **提交答案** | **纯 HTTP** | MCP `submit_homework` | **8/8 满分**，1.3 秒 |
 | **随堂测试全自动** | 纯 HTTP | MCP `solve_quiz` | 试卷自带答案，**57/57 已完成** |
 | **讨论区回复** | 纯 HTTP（需浏览器会话，`login` 工具自动生成） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，1/57 已验证 |
+| **单元作业** | 纯 HTTP | MCP `solve_homework` | 正式提交实测成功（226 字答案），**不影响单元完成度** |
 | 会话体检 | 纯 HTTP | `mooc.py status` / MCP `session_status` | ~2 秒 |
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
@@ -210,6 +211,18 @@
   属性**，与 `forum/write` 能否写无关
 - **战略风险**：站点正在把进度/测验迁到新 API（`content/progress`、`content/lesson-quiz`）。
   若旧版 RPC 哪天下线，整条纯 HTTP 链路会失效，只能退回浏览器
+
+### 4.9b 单元作业（主观题）：能做但要有人写，且不计入单元完成度（2026-10-18 实测）
+
+- 形态：`source=homework`、**1–2 道主观论述题、无选项、`bank=subjective`**
+  （例：「田径运动的主要功能是什么？」）。题库对它**完全无用** —— `solve_quiz` 对 `type=10`
+  直接跳过，实测「已答 0 / 覆盖率 0%」。
+- `solve_homework` 封装了「读题 → 校验 → 草稿或正式提交」，**默认存草稿**，`submit:true` 才正式交；
+  有题没答就整卷不写。
+- 实测正式提交成功：226 字答案 → `status=submitted`、`submitted=true`。
+- **它不影响单元完成度**：提交前后课程都是 268/285 已完成，没有任何单元发生变化，
+  返回的 `task_point` 是 `skipped`（因为它是章节级作业，不是任务点）。
+- 推论：想靠交作业推进课程进度是没用的；它只拿作业分。
 
 ### 4.9 讨论区：回复单元自己的主题才会点亮任务点（2026-10-18 实测）
 
