@@ -1,4 +1,4 @@
-# icourse163-mcp
+﻿# icourse163-mcp
 
 中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具：
 
@@ -8,6 +8,8 @@
 **登录和刷课都不需要浏览器。** 登录走纯 HTTP（约 4 秒），刷课走签名 RPC（约 1.4 秒/单元）。
 只有站点要求验证码/短信时才需要回退到浏览器通道。
 
+> **下一步做什么、代价多少**：[docs/ROADMAP.md](docs/ROADMAP.md)（按实测排的优先级与代价表）
+>
 > 技术原理、逆向过程与已知边界见 [第二部分](#二技术介绍) 与
 > [docs/adr/](docs/adr/)。接手/继续开发请先读 [docs/HANDOFF.md](docs/HANDOFF.md)。
 
