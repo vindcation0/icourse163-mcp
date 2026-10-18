@@ -64,8 +64,15 @@ npm run check:rpc --silent -- --course-id 1450750234 --term-id 1475848441 --scho
 | 登录（纯 HTTP） | ✅ **可用，无浏览器，~3.6s** | `python mooc.py login`（`npm run login:http -- -u <手机号> --channel phone`） |
 | 登录后操作菜单 | ✅ 可用 | `python mooc.py login` 成功后输入序号 |
 | 会话状态体检 | ✅ 可用 | MCP `session_status`，或 `mooc.py status` |
-| 测验 / 作业答题辅助 | 🟡 工具已存在，**端到端未验证** | MCP `get_homework` / `save_homework_answers` / `submit_homework` |
+| 测验 / 作业答题辅助 | ✅ **读题 + 正式提交已 live 验证**（8/8 满分）；⚠️ 草稿态非通用 | MCP `get_homework` / `save_homework_answers` / `submit_homework` |
 | 考试代交 | ❌ 明确不做 | — |
+
+**答题的三条实测结论（2026-10-18，详见 [ROADMAP](ROADMAP.md) §0.3）：**
+
+1. `submitAnswers` **不需要签名** —— 不带 `auth-signature` 的普通 JSON POST 直接成功
+2. `preview:true` 对 `test.type=2` 的测验**被服务端拒绝**（"本试卷不支持草稿预览保存"），
+   这类卷只能直接正式提交 ⇒ "先草稿后确认"的安全流程**不是通用的**
+3. 答案映射要按 **`options[].content` 正文匹配**再取 `id`，不要写死选项顺序
 
 **已知的产品选择**：密码输入**默认可见**（`--hide-password` 可关闭）—— 按使用者要求定的，
 README 里如实标注了代价（回显会留在终端回滚区/录屏里）。
