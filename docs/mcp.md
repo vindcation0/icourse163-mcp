@@ -223,6 +223,21 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - 题库**收不到任何 cookie**：走独立 fetch（`credentials: omit`），不走带会话的 HTTP 客户端。
 - `attempts` 即使 dry run 也会返回 —— 调用方要靠它决定是否花掉一次机会。随堂测试没有次数字段，如实返回 null。
 
+## `login`
+
+- **弹出一个有头 Chrome**，让用户自己在窗口里登录 icourse163，然后提取并保存会话。
+  调用会**阻塞**到登录完成或超时（默认 180000 ms，可用 `timeout_ms` 调）。
+- **不接受账号、密码、cookie 参数** —— 这是硬约束。MCP 参数必须先由模型产出，
+  密码一旦作为参数传入就会进入模型上下文与会话记录；这个工具反过来把输入交给浏览器，
+  密码只存在于浏览器进程里。
+- 成功时保存两级会话：
+  1. URS 会话（刷课/读题/交卷用，`/web/j/*.rpc` 认它）
+  2. **完整 cookie header** → `browser-session`（讨论区用，新版 API 只认它）
+- 用的是持久化 profile，**已登录时几乎立即返回**，不会真的等人。
+- 返回字段只有 `ok` / `status` / `browser_session_saved_to` / `message`，**永远不含 cookie**。
+- 失败时按 `describeLoginFailure` 给出可读原因（如站点处于短信/扫码模式）。
+- 前提：本机有 Chrome（或设 `ICOURSE163_CHROME`）。无头环境用不了这个工具，用 `npm run login`。
+
 ## `list_discussion_units`
 
 - 只读。走**新版 Next.js API**（`/front-mooc-learn/api/learn/*`），**不是** `/api/learn/*`（那个 404）。

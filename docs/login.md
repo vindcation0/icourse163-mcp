@@ -41,7 +41,7 @@ ICOURSE163_USERNAME='…' ICOURSE163_PASSWORD='…' npm run login --silent
 
 流程：打开首页（SPA，等待可见的「登录」入口，而不是立刻扫 DOM）→ `iframe[src*='reg.icourse163.org'][src*='index_dl2']`。URS 默认短信/扫码，密码框可能已存在但隐藏；若未见密码框则点「密码登录 / 账号登录 / 邮箱登录」，再填账密。提交点可见的 `a.u-loginbtn` / `button|input[type=submit]` / `#dologin`，或可见的纯「登录」文案（不会点隐藏的「网易邮箱账号登录」）。需要本机 **Chrome / Chromium**（`playwright-core` 走系统 Chrome `channel: "chrome"`；也可设 `ICOURSE163_CHROME` 指向浏览器可执行文件）。无图形界面时走 headless。
 
-不做学校 SSO（docs.icourse163.org）。登录 CLI 只负责会话建立；产品目标/默认关闭的开关（含**考试提交默认关闭**）见 [README](../README.md)。
+不做学校 SSO（docs.icourse163.org）。登录 CLI 只负责会话建立（等价能力的 `login` MCP 工具见 [mcp.md](mcp.md)，它弹浏览器、不收密码参数）；产品目标/默认关闭的开关（含**考试提交默认关闭**）见 [README](../README.md)。
 
 ## 确认 / 清除
 

@@ -11,7 +11,7 @@ import {
 } from "playwright-core";
 
 import { cookieHasNtesstudysi, cookieHasStudyInfo } from "./cookie";
-import type { WritableCredentialStore } from "./credentials";
+import { createFileCredentialStore, type WritableCredentialStore } from "./credentials";
 
 export type PasswordCredentials = {
   username: string;
@@ -363,4 +363,69 @@ export function cookieHeaderFrom(cookies: Cookie[]): string | null {
 
 function sleep(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export type InteractiveLoginResult = {
+  ok: boolean;
+  /** 提取到的完整 cookie header；失败为 null。**不要打印它。** */
+  cookie: string | null;
+  /** 完整 header 同时写到了这个文件，讨论区工具从那里读。 */
+  browserSessionPath: string;
+  /** 给调用方看的说明（不含任何 cookie 内容）。 */
+  message: string;
+};
+
+/** 交互式登录的默认等待上限。要够用户在浏览器里输完手机号 + 密码 + 可能的验证。 */
+export const INTERACTIVE_LOGIN_DEFAULT_TIMEOUT_MS = 180_000;
+
+/**
+ * 交互式登录：**弹出一个有头浏览器，让用户自己登录**，然后提取 cookie。
+ *
+ * 为什么不收密码参数：MCP 工具的参数必须先由模型产出，密码一旦作为参数传入就会进入
+ * 模型上下文与会话记录。这个函数反过来把输入交给浏览器，密码只存在于浏览器进程里。
+ *
+ * 顺带解决两件事：
+ *  1. 讨论区需要的完整 cookie 也一起写进 `browser-session`，用户不用再手抄；
+ *  2. 用同一个持久化 profile，所以已登录时会立刻返回（不会真的弹窗等人）。
+ */
+export async function interactiveBrowserLogin(options: {
+  credentials: WritableCredentialStore;
+  /** 浏览器会话文件；讨论区工具从这里读。 */
+  browserSessionPath: string;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  timeoutMs?: number;
+}): Promise<InteractiveLoginResult> {
+  const timeoutMs = options.timeoutMs ?? INTERACTIVE_LOGIN_DEFAULT_TIMEOUT_MS;
+  let context: BrowserContext | undefined;
+  try {
+    // 强制有头：用户必须在可见窗口里输入，否则这功能没有意义。
+    context = await launchBrowserContext(options.env, false);
+    const page = context.pages()[0] ?? (await context.newPage());
+    await page.goto(HOMEPAGE, { waitUntil: "domcontentloaded", timeout: PASSWORD_LOGIN_TIMEOUT_MS });
+
+    const cookie = await waitForSessionCookie(context, timeoutMs);
+    // ① URS 会话（刷课/读题/交卷用），交给原有存储，可能是裁剪后的
+    await options.credentials.setCookie(cookie);
+    // ② 完整 header 单独存一份，给新版 API（讨论区）用
+    const browserStore = createFileCredentialStore({ path: options.browserSessionPath, env: options.env });
+    await browserStore.setCookie(cookie);
+
+    return {
+      ok: true,
+      cookie,
+      browserSessionPath: options.browserSessionPath,
+      message:
+        "登录成功，会话已保存（URS 会话 + 浏览器会话）。password 从未经过本工具的参数。",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      cookie: null,
+      browserSessionPath: options.browserSessionPath,
+      message: describeLoginFailure(error),
+    };
+  } finally {
+    await context?.close().catch(() => undefined);
+  }
 }

@@ -9,7 +9,7 @@
 ## 0. 30 秒摘要
 
 **这是什么**：中国大学MOOC（icourse163.org）的本机工具，两条入口共用同一个引擎 ——
-`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，11 个工具）。
+`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，12 个工具）。
 
 **一句话现状**：
 > **登录、刷课、读题、答题提交、讨论区回复 —— 全部纯 HTTP 可用且已实测。**
@@ -45,16 +45,17 @@
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
 
-**11 个 MCP 工具里 9 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
+**12 个 MCP 工具里 9 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
 讨论区两个工具需要**浏览器登录的 cookie**（但请求本身仍是纯 HTTP）。
 
-### 1b. Agent 调用速查表（11 个工具，按用途分组）
+### 1b. Agent 调用速查表（12 个工具，按用途分组）
 
 **读（4 个，纯 HTTP，无副作用）**
 
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `session_status` | — | 会话体检；`ok` / `auth_expired` |
+| `login` | `timeout_ms?` | **弹出有头浏览器**让用户自己登录，再自动保存两级会话；**不接受账号密码参数** |
 | `list_courses` | — | 已选课列表（`id` / `name` / `school` / `term_id`） |
 | `list_todos` | — | 开放待办（实测 159：测验 137 / 作业 21 / 考试 1） |
 | `list_term_units` | `course_id` `term_id` `school_short_name?` | 目录 lesson→unit（`video`/`doc`/`quiz`/`other`） |
@@ -91,7 +92,7 @@
 
 | 不能 | 原因 |
 |---|---|
-| 登录 / 重新登录 | CLI-only（`npm run login`）。MCP 工具**不接受账号、密码、cookie 参数** |
+| 拿到账号密码 | `login` 工具**不接受**账号/密码参数。密码只会输在它弹出的浏览器里，不经过模型 |
 | 默认提交考试 | `allow_exam` 默认 false；开启后仍受 `submit` 与 `min_coverage` 约束 |
 | 无会话时用讨论区 | 返回 `no_session`（缺失或 401） |
 | 把失败伪装成成功 | 所有失败都是 `isError: true`，不会伪装成"没有待办" |
@@ -284,7 +285,7 @@ python mooc.py auto       # 刷课（--transport 默认 rpc，绝不回退浏览
 python mooc.py settings
 
 # agent 用
-npm start --silent        # stdio MCP 服务器（11 个工具）
+npm start --silent        # stdio MCP 服务器（12 个工具）
 
 # 打包 / 发布
 python scripts/build-exe.py     # → dist/mooc/mooc.exe
@@ -310,7 +311,7 @@ python tests/mooc_menus_test.py              # 菜单桩测试，13 组全过
 | **STATUS.md**（本文） | 接手入口：现状、结论、边界、危险动作 |
 | [ROADMAP.md](ROADMAP.md) | 优先级、代价表、依赖图、待拍板决策 |
 | [HANDOFF.md](HANDOFF.md) | 逆向硬事实、踩坑史（含三次误读同一个错误码的教训） |
-| [mcp.md](mcp.md) | 11 个工具的契约与状态码语义 |
+| [mcp.md](mcp.md) | 12 个工具的契约与状态码语义 |
 | [login.md](login.md) | 登录细节（纯 HTTP / 浏览器 / cookie 粘贴） |
 | [adr/](adr/) | 5 份架构决策记录（RPC 签名、URS 登录、作业 RPC 等） |
 

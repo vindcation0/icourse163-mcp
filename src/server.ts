@@ -12,6 +12,8 @@ import { listTodos } from "./list-todos";
 import type { Icourse163Ports } from "./ports";
 import { sessionStatus } from "./session-status";
 import { createBrowserSessionStore, listDiscussionUnits, replyDiscussion } from "./discussion";
+import { interactiveBrowserLogin } from "./open-login";
+import { createLocalCredentialStore } from "./credentials";
 import { solveQuiz } from "./solve-quiz";
 import { studyUnit } from "./study-unit";
 
@@ -86,6 +88,14 @@ const SUBMIT_HOMEWORK_DESCRIPTION = [
   "No cookies/passwords.",
 ].join(" ");
 
+const LOGIN_DESCRIPTION = [
+  "Open a VISIBLE Chrome window on the user's desktop and let THEM log in to icourse163 there. Then extract the session and save it.",
+  "This tool deliberately takes no username or password. MCP arguments must be produced by the model, so a password passed here would enter the model context and the transcript; instead the typing happens inside the browser and never reaches this process.",
+  "On success it stores two things: the URS session (used by the study/quiz tools) and the full browser cookie header (needed by the discussion tools, which reject the URS session).",
+  "The browser uses the persistent profile, so if that profile is already logged in the call returns almost immediately without interaction.",
+  "The call blocks until login completes or times out, and the returned payload never contains the cookie. Args: timeout_ms (default 180000).",
+].join(" ");
+
 const DISCUSSIONS_DESCRIPTION = [
   "List the discussion units of a course/term (read-only).",
   "Uses the site's newer Next.js API (/front-mooc-learn/api/learn/*), which requires a BROWSER login cookie — the npm run login session is rejected by it with 401. The cookie is read from ~/.config/icourse163-mcp/browser-session or ICOURSE163_BROWSER_COOKIE; tools never take cookies or passwords as arguments.",
@@ -156,6 +166,41 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: { ...result },
         isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "login",
+    {
+      title: "Log in via a visible browser (no password argument)",
+      description: LOGIN_DESCRIPTION,
+      inputSchema: {
+        timeout_ms: z
+          .number()
+          .optional()
+          .describe("How long to wait for the user to finish logging in (default 180000). The call blocks until then."),
+      },
+    },
+    async (args) => {
+      const result = await interactiveBrowserLogin({
+        credentials: createLocalCredentialStore(),
+        browserSessionPath: browserSession.path,
+        env: process.env,
+        platform: process.platform,
+        timeoutMs: args.timeout_ms,
+      });
+      // 绝不让 cookie 进入返回值/日志。
+      const payload = {
+        ok: result.ok,
+        status: result.ok ? ("ok" as const) : ("failed" as const),
+        browser_session_saved_to: result.browserSessionPath,
+        message: result.message,
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+        structuredContent: { ...payload },
+        isError: !result.ok,
       };
     },
   );

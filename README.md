@@ -6,7 +6,7 @@
 - **stdio MCP 服务器** —— 给 AI agent 用的一套工具
 
 **登录和刷课都不需要浏览器。** 登录走纯 HTTP（约 4 秒），刷课走签名 RPC（约 1.4 秒/单元），
-读题与答卷提交同样是纯 HTTP（11 个 MCP 工具里 9 个完全不用浏览器）。
+读题与答卷提交同样是纯 HTTP（12 个 MCP 工具里 9 个完全不用浏览器）。
 
 **唯一的例外**：`mooc.py` 的 `--transport` 默认 `rpc`，绝不回退浏览器；但 MCP 的 `study_unit`
 默认 `transport=auto`，遇到 `-10006` / 限流 / 时钟类错误会**自动尝试启动 Chrome**。
@@ -166,7 +166,7 @@ npm run login:http --silent -- --channel phone  # 纯 HTTP 通道
 npm run login --silent -- --check              # 体检
 ```
 
-### 工具（共 11 个）
+### 工具（共 12 个）
 
 | 工具 | 作用 |
 |---|---|
