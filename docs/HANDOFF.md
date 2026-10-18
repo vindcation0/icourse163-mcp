@@ -497,3 +497,44 @@ docs/adr/0005-urs-http-login.md
 这些工具违反平台服务条款，仓库自己的文档也记录了被检测的风险。
 `study_unit` 一次性上报全时长（不是真人那样每约 60 秒报一次），**进度曲线不像真人** ——
 如果要更自然的痕迹，需要改成按时间间隔分块上报。这一点**没有做**，用之前请知情。
+
+---
+
+## 11. 通道路径与目录结构（从 README 搬来，README 已只留使用说明）
+
+### 11.1 通道路径
+
+| 通道 | 用途 | 耗时 | 依赖 |
+|---|---|---|---|
+| **签名 RPC** | 刷视频/文档进度 | ~1.4 秒/单元 | 仅 HTTP |
+| **URS 纯 HTTP** | 登录 | ~4 秒 | 仅 HTTP |
+| **旧版 RPC** | 读题、交卷、目录 | ~1–3 秒 | 仅 HTTP |
+| **新版 Next.js API**（`/front-mooc-learn/api/learn/*`） | 讨论区 | ~1–2 秒 | 需**浏览器登录**的会话 |
+| Playwright | 回退：验证码、疑难导航 | ~30 秒 | Chrome + 可用网页会话 |
+
+`mooc.py` 只是 Python 封装：通过 stdio 驱动本仓 MCP 服务器（刷课）并调用 Node CLI（登录），
+所以**密码永远不经过 MCP 或 AI**。
+
+### 11.2 目录结构
+
+```text
+mooc.py                  傻瓜刷课脚本（纯 Python 标准库，只覆盖刷课）
+src/stdio.ts             MCP 服务器入口（13 个工具）
+src/discussion.ts        讨论区：读单元 / 回复主题
+src/solve-homework.ts    单元作业流水线
+src/solve-quiz.ts        测验流水线（试卷优先 + 题库）
+src/tiku.ts              题库层（OCS AnswererWrapper 兼容）
+src/homework.ts          读题 / 草稿 / 提交 / 任务点上报
+src/rpc-sign.ts          RPC 请求签名
+src/urs-login.ts         URS 纯 HTTP 登录 + 会话落地
+src/open-login.ts        Playwright 登录 + 交互式浏览器登录
+src/session-status.ts    会话体检
+src/study-unit.ts        刷课编排（RPC / Playwright）
+src/study-playwright.ts  浏览器路径
+scripts/run-mcp.sh|.cmd  MCP 启动包装（给没有 cwd 的客户端用）
+scripts/build-exe.py     打包 exe
+docs/STATUS.md           接手入口：现状 / 硬事实 / 危险动作
+docs/ROADMAP.md          优先级与代价
+docs/mcp.md              工具契约与状态码语义
+docs/adr/                架构决策记录（含逆向证据）
+```
