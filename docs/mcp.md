@@ -242,7 +242,8 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 
 - 只读。走**新版 Next.js API**（`/front-mooc-learn/api/learn/*`），**不是** `/api/learn/*`（那个 404）。
 - 鉴权：读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`。
-  **不认** `npm run login` 的会话（那份对这些端点必然 401），也不会回退过去。
+  这份文件可以由 **`login` 工具自动写入**（有头浏览器），不需要手工复制。
+  **不认** `npm run login` 的 URS 会话（那份对这些端点必然 401），也不会回退过去。
 - 入参：`course_id`、`term_id`、可选 `school_short_name`。
 - 返回每个讨论单元的 `unit_id`、`lesson_id`、`content_id`（**就是老师创建的主题 id**）、
   `view_status`、`complete_percent`、`completed`。

@@ -362,7 +362,8 @@ GET /api/learn/forum/detail?courseKey&page&pid&sort&tid&forumScope=mooc
 ### 7.5 剩余风险
 
 - 回复是**公开内容**：按各主题写一句课程相关的真实回答，不要重复或灌水
-- 需要浏览器 cookie：实现时复用 `npm run login` 存下的浏览器会话，或由用户临时提供
+- ~~需要浏览器 cookie~~ → ✅ **已解决**：`login` 工具（有头浏览器）成功后自动写 `browser-session`。
+  实测 `followedStatus` 由 `UNAUTHENTICATED` 变 `AVAILABLE`，无需手抄。**必须用有头模式**，无头取到的会话新 API 不认
 - 进度：**1/57**（机制已验证），其余 56 个待执行
 
 ---

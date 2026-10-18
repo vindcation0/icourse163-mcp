@@ -85,8 +85,9 @@
 | `list_discussion_units` | `course_id` `term_id` `school_short_name?` | `content_id` = 主题 id；带 `view_status` / `completed` |
 | `reply_discussion` | `course_id` `term_id` `unit_id` `content` `school_short_name?` | 回复主题**即完成任务点**；已完成 → `already_complete` 拒绝重发 |
 
-鉴权读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`；
-**不认** `npm run login` 的会话。
+鉴权读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`。
+这份文件可以**自动生成**：调一次 `login` 工具（弹有头浏览器）即会写入，不用手抄。
+注意它**不是** `npm run login` 存的那份 URS 会话。
 
 ### 1c. Agent **做不到**的事
 
@@ -194,8 +195,12 @@
 | **新版 Next.js API** | **`/front-mooc-learn/api/learn/*`** | ❌ **被当成匿名** | 讨论区、课件页数据 |
 
 - 基址**不是** `/api/learn/*`（那个 404）—— 写错路径会得到 404 或 SSO 桥接页，看起来像"不可达"
-- 新版 API 需要**浏览器登录的 cookie**（含 `STUDY_INFO` + `STUDY_SESS`），否则写操作一律
+- 新版 API 需要**浏览器登录的 cookie**（含 `STUDY_INFO` + `STUDY_SESS` + `NTES_YD_SESS`），否则写操作一律
   `401 请先登录后继续`
+- ✅ **已能自动获得**：`login` 工具（有头浏览器）成功后会同时写 `browser-session`。
+  实测一次 `login` → 3150 字符 cookie → `followedStatus` 从 `UNAUTHENTICATED` 变 `AVAILABLE`，不再需要手抄
+- ⚠️ **有头 vs 无头是决定性的**：同一个 profile，**无头**读到的 cookie 让新 API 视为匿名（缺 `NTES_YD_SESS`，
+  因为页面里的跨域 cookie 同步没跑），**有头**则完整。所以别用无头模式去取这份会话
 - 判据陷阱：`personalUserId:null` **不能**说明未登录（登录 cookie 下也是 null）；
   可靠判据是 `followedStatus` 从 `UNAUTHENTICATED` → `AVAILABLE`
 - `forum/index` 的 `canWrite:false` + `writeReason:"当前接口仅提供只读讨论区数据"` 是**读接口自己的
