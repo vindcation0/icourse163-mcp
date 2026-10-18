@@ -6,6 +6,10 @@ dist/
 # worktree / local scratch
 .worktrees/
 .scratch/
+scratch/
+# 本机 MCP 客户端配置（含绝对路径，不进仓库；仓库自己的是 plugin.json / mcp.json）
+mcp_config.json
+
 
 # secrets and env
 .env
