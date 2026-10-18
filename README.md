@@ -1,13 +1,18 @@
-﻿# icourse163-mcp
+# icourse163-mcp
 
 中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具：
 
 - **`mooc.py`** —— 傻瓜刷课脚本（给人用）
 - **stdio MCP 服务器** —— 给 AI agent 用的一套工具
 
-**登录和刷课都不需要浏览器。** 登录走纯 HTTP（约 4 秒），刷课走签名 RPC（约 1.4 秒/单元）。
-只有站点要求验证码/短信时才需要回退到浏览器通道。
+**登录和刷课都不需要浏览器。** 登录走纯 HTTP（约 4 秒），刷课走签名 RPC（约 1.4 秒/单元），
+读题与答卷提交同样是纯 HTTP（8 个 MCP 工具里 7 个完全不用浏览器）。
 
+**唯一的例外**：`mooc.py` 的 `--transport` 默认 `rpc`，绝不回退浏览器；但 MCP 的 `study_unit`
+默认 `transport=auto`，遇到 `-10006` / 限流 / 时钟类错误会**自动尝试启动 Chrome**。
+想让 agent 的行为和人一致，就显式传 `transport: "rpc"`。
+
+> **接手先读**：[docs/STATUS.md](docs/STATUS.md) —— 现状 / 已验证的边界 / 硬事实 / 危险动作，一份就能上手。
 > **下一步做什么、代价多少**：[docs/ROADMAP.md](docs/ROADMAP.md)（按实测排的优先级与代价表）
 >
 > 技术原理、逆向过程与已知边界见 [第二部分](#二技术介绍) 与
