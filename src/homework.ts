@@ -174,6 +174,16 @@ export type SaveHomeworkArgs = {
   answers: SaveAnswerInput[];
   paper_type?: PaperType;
   school_short_name?: string;
+  /**
+   * 显式允许正式提交**考试**。默认 `false` —— 考试代交默认关闭。
+   *
+   * 这不是技术限制，是产品决定：考试的失败代价不对称（通常只有 1 次机会、不可撤回，
+   * 且试卷可能带 `allowSwitchPageCount` 之类的反作弊计数，实测本课程那个期末考试就是 0）。
+   * 所以默认拒绝，把决定权交给调用方；只有传 `true` 才真的走 `submitAnswers`。
+   *
+   * 草稿保存（`preview:true`）不受此开关约束 —— 给考试存草稿一直是允许的。
+   */
+  allow_exam?: boolean;
 };
 
 export function parseTodoId(todoId: string): ParsedTodoId | null {
@@ -493,7 +503,7 @@ export async function submitHomework(
   ports?: Icourse163Ports,
 ): Promise<SubmitHomeworkResult> {
   const parsed = parseTodoId(args.todo_id.trim());
-  if (parsed?.source === "exam") {
+  if (parsed?.source === "exam" && args.allow_exam !== true) {
     return {
       isError: true,
       status: "exam_out_of_scope",
@@ -505,7 +515,9 @@ export async function submitHomework(
         {
           where: "exam",
           message:
-            "考试代交不做：submit_homework 拒绝 exam 来源的 todo_id。可读题 + save 草稿，但绝不自动/正式提交考试。",
+            "考试代交默认关闭。真的要为这次考试正式提交，请显式传 allow_exam: true。" +
+            "提醒：考试通常只有一次机会且不可撤回，试卷还可能带反作弊计数（allowSwitchPageCount）。" +
+            "读题和存草稿不受此限制。",
         },
       ],
     };

@@ -67,7 +67,7 @@ npm run check:rpc --silent -- --course-id 1450750234 --term-id 1475848441 --scho
 | 登录后操作菜单 | ✅ 可用 | `python mooc.py login` 成功后输入序号 |
 | 会话状态体检 | ✅ 可用 | MCP `session_status`，或 `mooc.py status` |
 | 测验 / 作业答题辅助 | ✅ **读题 + 正式提交已 live 验证**（8/8 满分）；⚠️ 草稿态非通用 | MCP `get_homework` / `save_homework_answers` / `submit_homework` |
-| 考试代交 | ❌ 明确不做 | — |
+| 考试提交 | ⚠️ 默认关闭，需 `allow_exam: true` | 保持默认关闭 |
 
 **答题的三条实测结论（2026-10-18，详见 [ROADMAP](ROADMAP.md) §0.3）：**
 

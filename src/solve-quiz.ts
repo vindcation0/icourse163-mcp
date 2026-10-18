@@ -43,6 +43,8 @@ export type SolveQuizArgs = {
   /** 覆盖率下限，默认 0.8。低于它一律不提交。 */
   min_coverage?: number;
   paper_type?: "quiz" | "homework";
+  /** 显式允许正式提交考试。默认 false —— 见 `SaveHomeworkArgs.allow_exam`。 */
+  allow_exam?: boolean;
 };
 
 export type SolvedQuestion = {
@@ -123,12 +125,19 @@ export async function solveQuiz(
     errors: [],
   };
 
-  if (parsed?.source === "exam") {
+  if (parsed?.source === "exam" && args.allow_exam !== true) {
     return {
       ...base,
       isError: true,
       status: "exam_out_of_scope",
-      errors: [{ where: "exam", message: "考试代交不做：solve_quiz 拒绝 exam 来源。" }],
+      errors: [
+        {
+          where: "exam",
+          message:
+            "考试代交默认关闭。真要作答并正式提交考试，请显式传 allow_exam: true。" +
+            "即使开启，也只有 submit: true 且覆盖率达标时才会提交。",
+        },
+      ],
     };
   }
 
@@ -284,6 +293,7 @@ export async function solveQuiz(
       answers,
       school_short_name: args.school_short_name,
       paper_type: args.paper_type,
+      allow_exam: args.allow_exam,
     },
     ports,
   );

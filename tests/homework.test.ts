@@ -318,7 +318,7 @@ describe("saveHomeworkAnswers / submitHomework", () => {
     assert.equal(result.submitted, false);
   });
 
-  test("submit_homework posts preview:false and refuses exam", async () => {
+  test("submit_homework posts preview:false, refuses exam by default, allows it with allow_exam", async () => {
     const exam = await submitHomework(
       {
         todo_id: TODO_EXAM,
@@ -334,6 +334,37 @@ describe("saveHomeworkAnswers / submitHomework", () => {
     assert.equal(exam.status, "exam_out_of_scope");
     assert.equal(exam.submitted, false);
     assert.equal(exam.preview, false);
+
+    // "默认关闭"必须是真关闭：一次网络请求都不该发出去。
+    const { calls: examCalls, http: examHttp } = recordingHttp(() => ({ statusCode: 200, body: "{}" }));
+    await submitHomework(
+      { todo_id: TODO_EXAM, answers: [{ question_id: "11", option_ids: ["102"] }] },
+      portsWith(async () => SESSION, examHttp),
+    );
+    assert.equal(examCalls.length, 0);
+
+    // 只显式传 allow_exam: true 才允许正式提交。
+    const { calls: allowedCalls, http: allowedHttp } = recordingHttp((input) => {
+      const warmed = warmupOk(input);
+      if (warmed) return warmed;
+      const term = termEmptyOk(input);
+      if (term) return term;
+      if (input.url.startsWith(QUIZ_PAPER_RPC_URL)) {
+        return { statusCode: 200, body: paperBody() };
+      }
+      if (input.url.startsWith(SUBMIT_ANSWERS_RPC_URL)) {
+        assert.equal((input.json as { preview: boolean }).preview, false);
+        return { statusCode: 200, body: JSON.stringify({ code: 0, result: { score: 80 } }) };
+      }
+      return { statusCode: 200, body: "{}" };
+    });
+    const allowed = await submitHomework(
+      { todo_id: TODO_EXAM, answers: [{ question_id: "11", option_ids: ["102"] }], allow_exam: true },
+      portsWith(async () => SESSION, allowedHttp),
+    );
+    assert.equal(allowed.status, "submitted");
+    assert.equal(allowed.submitted, true);
+    assert.ok(allowedCalls.some((c) => c.url.startsWith(SUBMIT_ANSWERS_RPC_URL)));
 
     const { calls, http } = recordingHttp((input) => {
       const warmed = warmupOk(input);

@@ -81,7 +81,7 @@ const SUBMIT_HOMEWORK_DESCRIPTION = [
   "Formally submit answers for a homework/quiz todo. Explicit opt-in ONLY — call after the user confirms.",
   "Default workflow must use save_homework_answers (draft) first; do not submit without user confirmation.",
   "Args: todo_id; answers[{question_id, option_ids?, text?}]; optional paper_type; optional school_short_name.",
-  "Posts mocQuizRpcBean.submitAnswers with preview=false. Refuses exam source todo_ids (考试代交不做).",
+  "Posts mocQuizRpcBean.submitAnswers with preview=false. Exam source todo_ids are REFUSED unless allow_exam:true is passed explicitly (default OFF).",
   "For a unit-source quiz (a 随堂测试 that is its own unit) it ALSO reports that unit's task point via saveMocContentLearn contentType=5, because submitAnswers alone grades the paper without marking the outline entry done; the result then carries task_point: marked|failed|skipped.",
   "No cookies/passwords.",
 ].join(" ");
@@ -106,7 +106,7 @@ const SOLVE_QUIZ_DESCRIPTION = [
   "Read + submit are verified over plain HTTP (no browser, no request signing). Session cookies never leave for the bank: the bank call uses a separate fetch with credentials omitted.",
   "Args: todo_id (from list_todos); tiku_config (JSON array of OCS AnswererWrapper entries); optional submit (default FALSE), min_coverage (default 0.8), paper_type, school_short_name.",
   "Default behaviour is a dry run: it returns every question with the bank's answer, the matched option ids and the coverage, and writes nothing. Submission happens only with submit:true AND coverage >= min_coverage.",
-  "Refuses exam source todo_ids. Reports attempts read from the course catalog (used/limit/timed) and refuses when attempts are exhausted; note unit-level 随堂测试 have no attempt fields at all, so that check cannot apply to them.",
+  "Exam source todo_ids are refused unless allow_exam:true is passed explicitly (default OFF). Reports attempts read from the course catalog (used/limit/timed) and refuses when attempts are exhausted; note unit-level 随堂测试 have no attempt fields at all, so that check cannot apply to them.",
   "Objective questions (single/multiple/judgement) are answerable from a bank. Subjective questions are skipped: their type maps to unknown and the result says so, because a bank cannot answer an essay.",
 ].join(" ");
 
@@ -347,6 +347,12 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         answers: z.array(answerItemSchema).describe("Answers keyed by question_id"),
         paper_type: z.enum(["quiz", "homework"]).optional(),
         school_short_name: z.string().optional(),
+        allow_exam: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. Exam submission stays OFF unless this is explicitly true. Exams usually allow one attempt, cannot be undone, and may carry anti-cheat counters (allowSwitchPageCount). Drafts are unaffected.",
+          ),
       },
     },
     async (args) => {
@@ -356,6 +362,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           answers: args.answers,
           paper_type: args.paper_type,
           school_short_name: args.school_short_name,
+          allow_exam: args.allow_exam,
         },
         ports,
       );
@@ -389,6 +396,12 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         min_coverage: z.number().optional().describe("Minimum answered ratio to allow submit (default 0.8)"),
         paper_type: z.enum(["quiz", "homework"]).optional(),
         school_short_name: z.string().optional(),
+        allow_exam: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. Exam answering/submission stays OFF unless explicitly true; submit:true and min_coverage still apply on top of it.",
+          ),
       },
     },
     async (args) => {
@@ -400,6 +413,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           min_coverage: args.min_coverage,
           paper_type: args.paper_type,
           school_short_name: args.school_short_name,
+          allow_exam: args.allow_exam,
         },
         ports,
       );

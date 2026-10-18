@@ -177,10 +177,24 @@ npm run login --silent -- --check              # 体检
 | `list_todos` | 仍开放的作业/测验/考试待办 |
 | `get_homework` | 读题（解析 catalog id → 试卷 `contentId`） |
 | `save_homework_answers` | **必调**：存草稿（`preview=true`），不可能正式提交 |
-| `submit_homework` | 仅在你明确确认后调用；拒绝 exam 类 todo |
+| `submit_homework` | 仅在你明确确认后调用；考试默认拒绝，需显式 `allow_exam: true` |
 | `solve_quiz` | 读题 → 查题库/用试卷自带答案 → （可选）提交；默认只出清单不提交 |
 | `list_discussion_units` | 列出讨论单元（`content_id` = 主题 id）；需**浏览器登录**的 cookie |
 | `reply_discussion` | 回复该单元的主题即完成任务点；已完成则拒绝重发 |
+
+### 默认关闭的开关
+
+有一个能力**故意默认关闭**，需要你显式打开：
+
+| 开关 | 默认 | 打开方式 |
+|---|---|---|
+| 考试提交 | **关闭** | `submit_homework` / `solve_quiz` 传 `allow_exam: true` |
+
+- 关闭时，`source=exam` 的待办会返回 `exam_out_of_scope` 并说明怎么开；**读题和存草稿不受影响**。
+- 打开后仍要满足原有闸门：`submit_homework` 本来就只在显式调用时才提交；`solve_quiz` 还要求 `submit: true` 且覆盖率达标。
+- 为什么默认关：考试通常**只有一次机会、不可撤回**，试卷还可能带反作弊计数
+  （实测本课程期末考试的 `allowSwitchPageCount` 为 `0`，即切换页面零容忍）。
+  开启等于你自担被检测的风险。
 
 `status: ok` 且列表为空表示**确实没有**，不是失败；认证失效是 `auth_expired`（`isError`），
 不会被伪装成空成功。
@@ -193,13 +207,13 @@ get_homework（读题）→ AI 填答 → save_homework_answers 必调（草稿�
 ```
 
 - **作业/测验**：AI 作答后**必须** `save`；`save` 不可能正式提交
-- **考试**：代交不做；`submit_homework` 拒绝 exam 来源
+- **考试**：读题、存草稿都可以；**正式提交默认关闭**，只有显式传 `allow_exam: true` 才会替你交卷（见下方「默认关闭的开关」）
 - **默认不交**：没有隐式 submit
 - **视频弹窗 / 随堂测验**：复用同一套 get + save，勿静默提交
 
 ### 非目标
 
-- **考试代交**（不做；不做自动 `submit`）
+- **考试自动提交**（**默认关闭**；必须显式开启，见「默认关闭的开关」）
 - 抢课
 - 把账号密码放进 MCP 工具参数
 

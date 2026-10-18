@@ -4,7 +4,7 @@
 
 工具含 `list_todos`、`list_courses`、`list_term_units`、`study_unit`、`get_homework`、`solve_quiz`、`list_discussion_units`、`reply_discussion`、`save_homework_answers`、`submit_homework`、`session_status`。登录只走 CLI，见 [docs/login.md](login.md)。MCP 从不接收或返回 cookie / 密码。
 
-产品目标对齐 OCS 学习自动化（自动看课、测验/作业辅助；**考试代交不做**），详见仓库根 [README](../README.md)。答卷流水线：`read` → AI 填答 → **`save` 必调（草稿）** → 用户确认后才显式 `submit`（默认不交）。实现可用 RPC 或 DOM/Playwright（或混合），由后续 issue 细化。
+产品目标对齐 OCS 学习自动化（自动看课、测验/作业辅助；**考试提交默认关闭，需显式开启**），详见仓库根 [README](../README.md)。答卷流水线：`read` → AI 填答 → **`save` 必调（草稿）** → 用户确认后才显式 `submit`（默认不交）。实现可用 RPC 或 DOM/Playwright（或混合），由后续 issue 细化。
 
 ## 安装
 
@@ -195,7 +195,7 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - 清晰错误：`not_found`（目录无此 id）、`unsupported`（缺 contentId）、`incomplete`（mocTermDto 不可用时**禁止**用目录 id 冒充 tid）、`auth_expired`；`code:0 result:null` 时提示 tid 可能未解析到试卷 contentId。
 - RPC：`mocQuizRpcBean.getOpenQuizPaperDto` / `getOpenHomeworkPaperDto`（可 mock）；遇并发限制短重试。
 - **流水线**：`get_homework`（读题）→ AI 填答 → **`save_homework_answers` 必调（草稿）** → 用户确认后才显式 `submit_homework`。默认不交。
-- 考试：可读题；正式提交见 `submit_homework`（拒绝 exam）。不要传账号或 cookie。
+- 考试：可读题、可存草稿；正式提交需显式 `allow_exam: true`（默认拒绝）。不要传账号或 cookie。
 
 ## `save_homework_answers`
 
@@ -208,7 +208,8 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 ## `submit_homework`
 
 - **显式正式提交（opt-in）**。仅在用户确认后调用；默认工作流只用 `save_homework_answers`。
-- 内部 `submitAnswers` 且 **`preview: false`**。`source=exam` 的 `todo_id` 直接 `exam_out_of_scope`（考试代交不做）。
+- 内部 `submitAnswers` 且 **`preview: false`**。`source=exam` 的 `todo_id` **默认**返回 `exam_out_of_scope`；显式传 `allow_exam: true` 才放行。
+- 为什么默认关：考试通常只有一次机会、不可撤回，且试卷可能带 `allowSwitchPageCount` 反作弊计数（实测本课程期末考试该值为 0）。开启即你自担风险。
 - 入参同 save。不要传账号或 cookie。
 
 ## `solve_quiz`
