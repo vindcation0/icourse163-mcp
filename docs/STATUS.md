@@ -48,13 +48,61 @@
 **11 个 MCP 工具里 9 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
 讨论区两个工具需要**浏览器登录的 cookie**（但请求本身仍是纯 HTTP）。
 
+### 1b. Agent 调用速查表（11 个工具，按用途分组）
+
+**读（4 个，纯 HTTP，无副作用）**
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `session_status` | — | 会话体检；`ok` / `auth_expired` |
+| `list_courses` | — | 已选课列表（`id` / `name` / `school` / `term_id`） |
+| `list_todos` | — | 开放待办（实测 159：测验 137 / 作业 21 / 考试 1） |
+| `list_term_units` | `course_id` `term_id` `school_short_name?` | 目录 lesson→unit（`video`/`doc`/`quiz`/`other`） |
+
+**刷课（1 个，签名 RPC）**
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `study_unit` | `course_id` `term_id` `unit_id` `school_short_name?` `playback_rate?` `page_interval_sec?` `skip_to_end?` `report_chunk_sec?` `transport?` | `transport` 默认 `auto`（可能**自动拉起 Chrome**）；只想纯 HTTP 就传 `"rpc"` |
+
+**答题（4 个）**
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `get_homework` | `todo_id` `paper_type?` `school_short_name?` | 读题（目录 id → 试卷 `tid`） |
+| `save_homework_answers` | `todo_id` `answers[]` `paper_type?` `school_short_name?` | 存草稿，`submitted` 恒 false |
+| `submit_homework` | `todo_id` `answers[]` `paper_type?` `school_short_name?` `allow_exam?` | 正式提交；单元级随堂测试**自动补任务点上报** |
+| `solve_quiz` | `todo_id` `tiku_config?` `submit?` `min_coverage?` `paper_type?` `school_short_name?` `allow_exam?` | 两段式（试卷优先 → 题库），默认 dry-run |
+
+`solve_quiz` 的闸门链：
+`submit:true` → 覆盖率 ≥ `min_coverage`(0.8) → 次数未用完 → 才提交。
+
+**讨论区（2 个，需浏览器登录 cookie）**
+
+| 工具 | 参数 | 说明 |
+|---|---|---|
+| `list_discussion_units` | `course_id` `term_id` `school_short_name?` | `content_id` = 主题 id；带 `view_status` / `completed` |
+| `reply_discussion` | `course_id` `term_id` `unit_id` `content` `school_short_name?` | 回复主题**即完成任务点**；已完成 → `already_complete` 拒绝重发 |
+
+鉴权读 `~/.config/icourse163-mcp/browser-session` 或 `ICOURSE163_BROWSER_COOKIE`；
+**不认** `npm run login` 的会话。
+
+### 1c. Agent **做不到**的事
+
+| 不能 | 原因 |
+|---|---|
+| 登录 / 重新登录 | CLI-only（`npm run login`）。MCP 工具**不接受账号、密码、cookie 参数** |
+| 默认提交考试 | `allow_exam` 默认 false；开启后仍受 `submit` 与 `min_coverage` 约束 |
+| 无会话时用讨论区 | 返回 `no_session`（缺失或 401） |
+| 把失败伪装成成功 | 所有失败都是 `isError: true`，不会伪装成"没有待办" |
+
 ---
 
 ## 2. 边界：什么**没有**
 
 | 项 | 状态 |
 |---|---|
-| **讨论区**（读/回复） | ❌ **零代码、零端点知识**。全仓库只有一行注释提到 `contentType 6 = discuss`，还被归成 `other` |
+| ~~讨论区（读/回复）~~ | ✅ **已实现**（`list_discussion_units` / `reply_discussion`），见 §1b。需要浏览器登录 cookie |
 | 考试提交 | ⚠️ **默认关闭**（`source=exam` 返回 `exam_out_of_scope`），显式 `allow_exam: true` 才放行；读题与草稿不受限 |
 | 草稿保存（通用） | ⚠️ 实测 `test.type=2` 的卷子被拒："本试卷不支持草稿预览保存" |
 | 逐题对错详情 | ⚠️ 没有。只能读目录里的 `test.userScore`（总分够用） |
