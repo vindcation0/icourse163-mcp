@@ -14,6 +14,7 @@ import { sessionStatus } from "./session-status";
 import { createBrowserSessionStore, listDiscussionUnits, replyDiscussion } from "./discussion";
 import { interactiveBrowserLogin } from "./open-login";
 import { createLocalCredentialStore } from "./credentials";
+import { solveHomework } from "./solve-homework";
 import { solveQuiz } from "./solve-quiz";
 import { studyUnit } from "./study-unit";
 
@@ -109,6 +110,13 @@ const REPLY_DISCUSSION_DESCRIPTION = [
   "Refuses when the unit is already complete, because replies are public content and must not be duplicated. Resolves content_id from the course outline itself; callers only pass unit_id.",
   "Same auth requirement as list_discussion_units: a browser login cookie, never the npm run login session.",
   "Args: course_id; term_id; unit_id; content (the reply text, must be specific to that topic, not filler).",
+].join(" ");
+
+const SOLVE_HOMEWORK_DESCRIPTION = [
+  "Pipeline for 单元作业 / subjective homework: read the paper, validate that every question has an acceptable answer, then either save a draft or submit.",
+  "Homework on this platform is 1-2 essay questions with no options (type 10, bank subjective), so a question bank cannot help — the text must come from the caller. This tool does not invent answers; it refuses when any question is unanswered and reports exactly which ones.",
+  "Call it with todo_id only to get the question list; call it again with answers to write. `submit` is the user's choice: omitted or false saves a draft, true submits formally. Drafts are the safer default because some papers reject them and some cannot be undone.",
+  "Args: todo_id; answers[{question_id, text?, option_ids?}]; optional submit, paper_type, school_short_name, allow_exam (default false).",
 ].join(" ");
 
 const SOLVE_QUIZ_DESCRIPTION = [
@@ -456,6 +464,46 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           tiku_config: args.tiku_config,
           submit: args.submit,
           min_coverage: args.min_coverage,
+          paper_type: args.paper_type,
+          school_short_name: args.school_short_name,
+          allow_exam: args.allow_exam,
+        },
+        ports,
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "solve_homework",
+    {
+      title: "Read/answer a subjective homework (draft by default)",
+      description: SOLVE_HOMEWORK_DESCRIPTION,
+      inputSchema: {
+        todo_id: z.string().describe("list_todos id with kind 作业"),
+        answers: z
+          .array(answerItemSchema)
+          .optional()
+          .describe("Omit to only read the questions. Subjective questions need text."),
+        submit: z
+          .boolean()
+          .optional()
+          .describe("false/omitted = save a draft (default); true = submit formally. The user decides."),
+        paper_type: z.enum(["quiz", "homework"]).optional(),
+        school_short_name: z.string().optional(),
+        allow_exam: z.boolean().optional().describe("Default false; same gate as submit_homework."),
+      },
+    },
+    async (args) => {
+      const result = await solveHomework(
+        {
+          todo_id: args.todo_id,
+          answers: args.answers,
+          submit: args.submit,
           paper_type: args.paper_type,
           school_short_name: args.school_short_name,
           allow_exam: args.allow_exam,

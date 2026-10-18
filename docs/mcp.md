@@ -212,6 +212,25 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - 为什么默认关：考试通常只有一次机会、不可撤回，且试卷可能带 `allowSwitchPageCount` 反作弊计数（实测本课程期末考试该值为 0）。开启即你自担风险。
 - 入参同 save。不要传账号或 cookie。
 
+## `solve_homework`
+
+- **单元作业**的流水线封装。作业卷实测形态：**1–2 道主观论述题、无选项、`bank=subjective`**
+  （例：「田径运动的主要功能是什么？」），所以题库完全无用 —— 正文必须由调用方提供。
+- 三态调用，全由调用方决定：
+  | 调用 | 行为 |
+  |---|---|
+  | 只传 `todo_id` | **只读题**，返回题目清单，不写任何东西 |
+  | 传 `answers`（不传 `submit`） | **只存草稿**（`preview:true`）—— 默认 |
+  | 传 `answers` + `submit: true` | **正式提交**（`preview:false`） |
+- **有题没答就整卷不写**：返回 `status:"incomplete"` + `missing[]`（含题目 id 与题干摘要），
+  一个写请求都不发。避免交半成品。
+- `draft_saved` 是实测值：部分卷子会拒绝草稿（非 0 code + 「预览不能提交」），此时返回
+  `status:"draft_rejected"` 并提示"要交就显式 `submit: true`"，**绝不**静默改成正式提交。
+- 回答 ≠ 生成：它**不会替你写内容**。`solve_quiz` 遇到 `type=10` 会直接跳过（实测已答 0），
+  这是刻意的。
+- 入参：`todo_id`；`answers[{question_id, text?, option_ids?}]`；可选 `submit`、`paper_type`、
+  `school_short_name`、`allow_exam`（默认 false，与 `submit_homework` 同一道闸门）。
+
 ## `solve_quiz`
 
 - 两段式作答：**先用试卷自带的答案**，剩下的才问题库。默认 **dry run**（`submit` 必须显式传 true）。

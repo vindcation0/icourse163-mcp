@@ -9,7 +9,7 @@
 ## 0. 30 秒摘要
 
 **这是什么**：中国大学MOOC（icourse163.org）的本机工具，两条入口共用同一个引擎 ——
-`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，12 个工具）。
+`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，13 个工具）。
 
 **一句话现状**：
 > **登录、刷课、读题、答题提交、讨论区回复 —— 全部可用且已实测；除 `study_unit` 的浏览器回退外都是纯 HTTP。**
@@ -47,10 +47,10 @@
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
 
-**12 个 MCP 工具里 9 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
+**13 个 MCP 工具里 10 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
 讨论区两个工具需要**浏览器登录的 cookie**（但请求本身仍是纯 HTTP）。
 
-### 1b. Agent 调用速查表（12 个工具，按用途分组）
+### 1b. Agent 调用速查表（13 个工具，按用途分组）
 
 **读（4 个，纯 HTTP，无副作用）**
 
@@ -76,6 +76,7 @@
 | `save_homework_answers` | `todo_id` `answers[]` `paper_type?` `school_short_name?` | 存草稿，`submitted` 恒 false |
 | `submit_homework` | `todo_id` `answers[]` `paper_type?` `school_short_name?` `allow_exam?` | 正式提交；单元级随堂测试**自动补任务点上报** |
 | `solve_quiz` | `todo_id` `tiku_config?` `submit?` `min_coverage?` `paper_type?` `school_short_name?` `allow_exam?` | 两段式（试卷优先 → 题库），默认 dry-run |
+| `solve_homework` | `todo_id` `answers?` `submit?` `paper_type?` `school_short_name?` `allow_exam?` | **单元作业**流水线：不传 `answers` 只读题；默认存草稿，`submit:true` 才正式交；有题没答就整卷不写 |
 
 `solve_quiz` 的闸门链：
 `submit:true` → 覆盖率 ≥ `min_coverage`(0.8) → 次数未用完 → 才提交。
@@ -292,7 +293,7 @@ python mooc.py auto       # 刷课（--transport 默认 rpc，绝不回退浏览
 python mooc.py settings
 
 # agent 用
-npm start --silent        # stdio MCP 服务器（12 个工具）
+npm start --silent        # stdio MCP 服务器（13 个工具）
 
 # 打包 / 发布
 python scripts/build-exe.py     # → dist/mooc/mooc.exe
@@ -318,7 +319,7 @@ python tests/mooc_menus_test.py              # 菜单桩测试，13 组全过
 | **STATUS.md**（本文） | 接手入口：现状、结论、边界、危险动作 |
 | [ROADMAP.md](ROADMAP.md) | 优先级、代价表、依赖图、待拍板决策 |
 | [HANDOFF.md](HANDOFF.md) | 逆向硬事实、踩坑史（含三次误读同一个错误码的教训） |
-| [mcp.md](mcp.md) | 12 个工具的契约与状态码语义 |
+| [mcp.md](mcp.md) | 13 个工具的契约与状态码语义 |
 | [login.md](login.md) | 登录细节（纯 HTTP / 浏览器 / cookie 粘贴） |
 | [adr/](adr/) | 5 份架构决策记录（RPC 签名、URS 登录、作业 RPC 等） |
 
