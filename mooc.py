@@ -1047,22 +1047,35 @@ def cmd_discuss(args: argparse.Namespace) -> None:
 
 
 def cmd_course(args: argparse.Namespace) -> None:
-    """一键跑完整门课（T1）。"""
-    with Mcp(timeout=args.timeout or 900.0) as mcp:
+    """一键跑完整门课（T1）。
+
+    这里**不再**用一次 study_course 阻塞到底 —— 那样屏幕上几分钟不动，用户会以为卡死。
+    改成先用 dry-run 拿到清单，再逐项调用对应工具，每做完一项就打印一行。
+    """
+    kind_labels = {
+        "media": "刷课",
+        "quiz": "随堂测试",
+        "discussion": "讨论",
+        "chapter_quiz": "章节测验",
+    }
+    with Mcp(timeout=args.timeout or 300.0) as mcp:
         check_session(mcp)
         course_id, term_id, school = pick_course(mcp, args.course, args.term)
-        arguments: dict = {
+        plan_args: dict = {
             "course_id": course_id,
             "term_id": term_id,
             "school_short_name": school,
             "dry_run": True,
+            "verbose": True,
         }
         if args.answer_mode:
-            arguments["answer_mode"] = args.answer_mode
-        plan = mcp.call("study_course", arguments)
+            plan_args["answer_mode"] = args.answer_mode
+        print("   正在统计要做什么……", flush=True)
+        plan = mcp.call("study_course", plan_args)
         counts = plan.get("counts", {})
         planned = counts.get("planned", {})
-        total = sum(int(planned.get(k, 0) or 0) for k in ("media", "quiz", "discussion", "chapter_quiz"))
+        items = plan.get("items", [])
+        total = sum(int(planned.get(k, 0) or 0) for k in kind_labels)
         print(
             f"\n   单元 {counts.get('units_total')}，已完成 {counts.get('units_complete_before')}，"
             f"待处理 {total}"
@@ -1071,26 +1084,103 @@ def cmd_course(args: argparse.Namespace) -> None:
             f"   其中 视频/文档={planned.get('media', 0)}  随堂测试={planned.get('quiz', 0)}  "
             f"讨论={planned.get('discussion', 0)}  章节测验={planned.get('chapter_quiz', 0)}"
         )
-        if total == 0:
+        if total == 0 or not items:
             print("\n   这门课没有要做的了。")
             return
         if args.dry_run:
-            print("\n   --dry-run：到此为止。")
+            print("\n   --dry-run：只列出前 10 项")
+            for item in items[:10]:
+                print(f"     [{kind_labels.get(item.get('kind'), item.get('kind'))}] {str(item.get('name', ''))[:34]}")
+            if len(items) > 10:
+                print(f"     …… 还有 {len(items) - 10} 项")
             return
-        if not ask_yes("开始跑？这会真的写进度"):
+        if not ask_yes(f"开始跑这 {len(items)} 项？这会真的写进度"):
             return
-        arguments["dry_run"] = False
-        result = mcp.call("study_course", arguments)
-        done = result.get("counts", {}).get("done", {})
-        skipped = result.get("counts", {}).get("skipped", {})
-        print(f"\n   完成：视频/文档={done.get('media', 0)} 随堂测试={done.get('quiz', 0)} "
-              f"讨论={done.get('discussion', 0)} 章节测验={done.get('chapter_quiz', 0)}")
-        if sum(int(v or 0) for v in skipped.values()) > 0:
+
+        done = {k: 0 for k in kind_labels}
+        skipped = {k: 0 for k in kind_labels}
+        failures: list[str] = []
+        started = time.time()
+        for index, item in enumerate(items, start=1):
+            kind = str(item.get("kind", ""))
+            unit_id = str(item.get("unit_id", ""))
+            name = str(item.get("name", ""))[:30]
+            label = kind_labels.get(kind, kind)
+            print(f"   [{index}/{len(items)}] {label}  {name} …… ", end="", flush=True)
+            tick = time.time()
+            try:
+                if kind == "media":
+                    got = mcp.call(
+                        "study_unit",
+                        {
+                            "course_id": course_id,
+                            "term_id": term_id,
+                            "unit_id": unit_id,
+                            "school_short_name": school,
+                            "transport": "rpc",
+                        },
+                    )
+                    ok = not got.get("isError")
+                    detail = str(got.get("status", ""))
+                elif kind in ("quiz", "chapter_quiz"):
+                    source = "quiz" if kind == "chapter_quiz" else "unit"
+                    solve_args: dict = {
+                        "todo_id": f"{course_id}:{term_id}:{source}:{unit_id}",
+                        "school_short_name": school,
+                        "submit": True,
+                    }
+                    if args.answer_mode:
+                        solve_args["answer_mode"] = args.answer_mode
+                    got = mcp.call("solve_quiz", solve_args)
+                    status = str(got.get("status", ""))
+                    ok = status == "ok"
+                    coverage = float(got.get("coverage") or 0.0)
+                    detail = f"{status} {coverage * 100:.0f}%"
+                elif kind == "discussion":
+                    got = mcp.call(
+                        "reply_discussion",
+                        {
+                            "course_id": course_id,
+                            "term_id": term_id,
+                            "unit_id": unit_id,
+                            "content": args.content or "1",
+                            "school_short_name": school,
+                        },
+                    )
+                    status = str(got.get("status", ""))
+                    ok = status in ("ok", "already_complete")
+                    detail = status
+                else:
+                    ok = False
+                    detail = f"未知类型 {kind}"
+            except Exception as exc:  # noqa: BLE001 - 单项失败不该中断整门课
+                ok = False
+                detail = f"{type(exc).__name__}: {exc}"
+            elapsed = time.time() - tick
+            print(f"{'✅' if ok else '✗'} {detail}（{elapsed:.1f}s）", flush=True)
+            if ok:
+                done[kind] = done.get(kind, 0) + 1
+            elif "跳过" in detail or "no_answer" in detail or "no_session" in detail:
+                skipped[kind] = skipped.get(kind, 0) + 1
+            else:
+                failures.append(f"{name} — {detail}")
+
+        spend = time.time() - started
+        print(
+            f"\n   完成：视频/文档={done.get('media', 0)} 随堂测试={done.get('quiz', 0)} "
+            f"讨论={done.get('discussion', 0)} 章节测验={done.get('chapter_quiz', 0)}"
+            f"（用时 {spend:.0f}s）"
+        )
+        if any(v for v in skipped.values()):
             print(f"   跳过：{skipped}")
-        for note in result.get("notes", []):
+        for note in plan.get("notes", []):
             print(f"   注意：{note}")
-        for failure in result.get("failures", []):
-            print(f"   ✗ {failure.get('name')} — {failure.get('detail')}")
+        if failures:
+            print(f"   失败 {len(failures)} 项：")
+            for line in failures[:10]:
+                print(f"     ✗ {line}")
+            if len(failures) > 10:
+                print(f"     …… 还有 {len(failures) - 10} 项")
 
 
 def ask_yes(prompt: str) -> bool:
