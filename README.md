@@ -1,7 +1,7 @@
 # icourse163-mcp
 
 中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具。**推荐通过 AI agent 调用**：
-13 个 MCP 工具覆盖登录、刷课、读题、答题提交、单元作业、讨论区。
+14 个 MCP 工具覆盖登录、刷课、读题、答题提交、单元作业、讨论区，外加**一条命令跑完整门课**。
 
 命令行入口（`mooc.py` / `mooc.exe`）**目前只覆盖刷课**，答题与讨论区没有菜单项 —— 见[第 2 节](#2-备选命令行moocpy--moocexe)。
 
@@ -41,7 +41,7 @@ Windows 用 `scripts/run-mcp.cmd`，POSIX 用 `scripts/run-mcp.sh`。
 **工具不收账号密码** —— MCP 参数必须先由模型产出，密码一旦作为参数传入就会进入模型上下文与
 会话记录。这个工具反过来把输入交给浏览器，密码只存在于浏览器进程里。
 
-### 1.3 工具清单（13 个）
+### 1.3 工具清单（14 个）
 
 #### 会话与读取（4 个，只读）
 
@@ -58,6 +58,7 @@ Windows 用 `scripts/run-mcp.cmd`，POSIX 用 `scripts/run-mcp.sh`。
 |---|---|---|
 | `study_unit` | `course_id` `term_id` `unit_id` `school_short_name?` `playback_rate?` `page_interval_sec?` `skip_to_end?` `report_chunk_sec?` `transport?` | 推进视频/文档进度。`transport` 默认 **`auto`**（rpc 优先，失败会**尝试拉起 Chrome**）；只想纯 HTTP 就显式传 `"rpc"` |
 | `list_term_units` | `course_id` `term_id` `school_short_name?` | 课件目录：`type`（video/doc/quiz/other）与完成度 |
+| `study_course` | `course_id` `term_id` `school_short_name?` `include?` `dry_run?` `discussion_content?` `delay_ms?` `max_units?` `verbose?` | **一键跑完整门课**（T1）：模型不在循环里。默认**真的会跑**；`dry_run:true` 只列计划 |
 
 #### 答题（5 个）
 

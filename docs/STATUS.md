@@ -9,7 +9,7 @@
 ## 0. 30 秒摘要
 
 **这是什么**：中国大学MOOC（icourse163.org）的本机工具，两条入口共用同一个引擎 ——
-`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，13 个工具）。
+`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，14 个工具）。
 
 **一句话现状**：
 > **登录、刷课、读题、答题提交、讨论区回复 —— 全部可用且已实测；除 `study_unit` 的浏览器回退外都是纯 HTTP。**
@@ -48,10 +48,10 @@
 | 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
 
-**13 个 MCP 工具里 10 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
+**14 个 MCP 工具里 11 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
 讨论区两个工具需要**浏览器登录的 cookie**（但请求本身仍是纯 HTTP）。
 
-### 1b. Agent 调用速查表（13 个工具，按用途分组）
+### 1b. Agent 调用速查表（14 个工具，按用途分组）
 
 **读（4 个，纯 HTTP，无副作用）**
 
@@ -68,6 +68,7 @@
 | 工具 | 参数 | 说明 |
 |---|---|---|
 | `study_unit` | `course_id` `term_id` `unit_id` `school_short_name?` `playback_rate?` `page_interval_sec?` `skip_to_end?` `report_chunk_sec?` `transport?` | `transport` 默认 `auto`（可能**自动拉起 Chrome**）；只想纯 HTTP 就传 `"rpc"` |
+| `study_course` | `course_id` `term_id` `school_short_name?` `include?` `dry_run?` `discussion_content?` `delay_ms?` `max_units?` `verbose?` | **T1 一键跑完整门课**：模型不在循环里。默认真的会跑；返回 368 字节（对比 `list_term_units` 的 47,657） |
 
 **答题（4 个）**
 
@@ -306,7 +307,7 @@ python mooc.py auto       # 刷课（--transport 默认 rpc，绝不回退浏览
 python mooc.py settings
 
 # agent 用
-npm start --silent        # stdio MCP 服务器（13 个工具）
+npm start --silent        # stdio MCP 服务器（14 个工具）
 
 # 打包 / 发布
 python scripts/build-exe.py     # → dist/mooc/mooc.exe
@@ -332,7 +333,7 @@ python tests/mooc_menus_test.py              # 菜单桩测试，13 组全过
 | **STATUS.md**（本文） | 接手入口：现状、结论、边界、危险动作 |
 | [ROADMAP.md](ROADMAP.md) | 优先级、代价表、依赖图、待拍板决策 |
 | [HANDOFF.md](HANDOFF.md) | 逆向硬事实、踩坑史（含三次误读同一个错误码的教训） |
-| [mcp.md](mcp.md) | 13 个工具的契约与状态码语义 |
+| [mcp.md](mcp.md) | 14 个工具的契约与状态码语义 |
 | [login.md](login.md) | 登录细节（纯 HTTP / 浏览器 / cookie 粘贴） |
 | [adr/](adr/) | 5 份架构决策记录（RPC 签名、URS 登录、作业 RPC 等） |
 

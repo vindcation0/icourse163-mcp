@@ -187,6 +187,22 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - **Limits / detection risk**: both RPC progress reports and automated DOM playback/page-turns may be flagged. Use only on accounts you own. Do not pass cookies/passwords. Login remains CLI-only (`npm run login`); MCP never accepts passwords.
 - Never pass accounts or cookies.
 
+## `study_course`
+
+- **T1：一条命令跑完整门课，模型不在循环里。** 读目录 → 对每个未完成单元：媒体报进度、
+  随堂测试用试卷自带答案、讨论回复一句固定内容 → 复查完成度。
+- **默认真的会跑**（`dry_run` 默认 false）。三个刹车：`max_units`（默认 400）、
+  `include`（只跑 media/quiz/discussion 之一）、`delay_ms`（默认 800，单元间节流）。
+- **讨论默认回 `"1"`** —— 使用者的明确选择（T1 里没有模型生成内容）。可用
+  `discussion_content` 覆盖。注意：回复长度**不影响耗时**（实测），所以这只影响观感。
+- **没有答案的测验跳过而不是猜。** 章节测验不泄露答案，没有题库时返回
+  `skipped_no_answer` 并计入 notes —— 猜会消耗作答次数、拉低分数，且**不推进任何进度**。
+- **讨论需要浏览器会话**（`login` 工具写入）。没有时标 `skipped_no_session`，
+  其余部分照常跑完，不会让整门课失败。
+- **不碰单元作业**（需要有人写正文）与**考试**（默认关闭）。
+- 返回体很小：实测 285 单元的课程，计划阶段 **368 字节**（`verbose:true` 才给逐项，2,367 字节）。
+- 失败项永远在 `failures[]` 里返回；单测被 `max_units` 截断时会在 `notes` 里说明。
+
 ## `get_homework`
 
 - 入参：`todo_id`（来自 `list_todos`，格式 `course_id:term_id:quiz|unit|homework|exam:content_id`）；可选 `paper_type`（`quiz`|`homework`；默认按来源推断，`homework`→作业卷，其余→测验卷）；可选 `school_short_name`。

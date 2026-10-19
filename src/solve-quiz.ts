@@ -25,6 +25,7 @@ import { resolveSession } from "./course-rpc";
 import {
   mapQuestionType,
   matchOptionIds,
+  loadTikuConfigFromDisk,
   parseTikuConfig,
   queryTiku,
   type AnswererWrapper,
@@ -142,9 +143,27 @@ export async function solveQuiz(
   }
 
   let config: AnswererWrapper[] = [];
-  if (args.tiku_config != null && args.tiku_config.trim() !== "") {
+  // 传了就用传的；没传则尝试磁盘上的题库配置（放一次，全局可用）。
+  const tikuRaw = args.tiku_config?.trim() ?? "";
+  if (tikuRaw === "") {
     try {
-      config = parseTikuConfig(args.tiku_config);
+      const fromDisk = await loadTikuConfigFromDisk();
+      if (fromDisk != null) {
+        config = fromDisk.config;
+      }
+    } catch (error) {
+      // 磁盘配置写坏了要说清楚，不能静默当成"没配题库"
+      return {
+        ...base,
+        isError: true,
+        status: "error",
+        errors: [{ where: "tiku_config", message: `题库配置文件解析失败：${error instanceof Error ? error.message : String(error)}` }],
+      };
+    }
+  }
+  if (tikuRaw !== "") {
+    try {
+      config = parseTikuConfig(tikuRaw);
     } catch (error) {
       return {
         ...base,

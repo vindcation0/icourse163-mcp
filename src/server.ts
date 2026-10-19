@@ -16,6 +16,7 @@ import { interactiveBrowserLogin } from "./open-login";
 import { createLocalCredentialStore } from "./credentials";
 import { solveHomework } from "./solve-homework";
 import { solveQuiz } from "./solve-quiz";
+import { studyCourse } from "./study-course";
 import { studyUnit } from "./study-unit";
 
 const SESSION_STATUS_DESCRIPTION = [
@@ -110,6 +111,15 @@ const REPLY_DISCUSSION_DESCRIPTION = [
   "Refuses when the unit is already complete, because replies are public content and must not be duplicated. Resolves content_id from the course outline itself; callers only pass unit_id.",
   "Same auth requirement as list_discussion_units: a browser login cookie, never the npm run login session.",
   "Args: course_id; term_id; unit_id; content (the reply text, must be specific to that topic, not filler).",
+].join(" ");
+
+const STUDY_COURSE_DESCRIPTION = [
+  "T1 one-shot: finish a whole course with no model in the loop. Walks the catalog and, for every incomplete unit, reports media progress, answers 随堂测试 from the paper's own answers, and replies to discussion topics.",
+  "Default is to actually run (dry_run defaults to false). Three brakes exist: max_units (default 400), include (which of media/quiz/discussion), and delay_ms between units.",
+  "Discussion replies default to the literal content \"1\" per the owner's explicit decision for T1; override with discussion_content. Replies are public, so this trades content quality for speed deliberately.",
+  "Quiz units are submitted only when an answer is available. Chapter quizzes do not leak answers, so without a tiku they are skipped and reported, never guessed — guessing costs an attempt and does not advance progress.",
+  "Discussions need the browser session from the login tool; without it they are skipped with skipped_reason and the rest still runs.",
+  "Does not touch 单元作业 (needs authored text) or exams (default off). Args: course_id; term_id; optional school_short_name, include, dry_run, discussion_content, delay_ms, max_units, verbose.",
 ].join(" ");
 
 const SOLVE_HOMEWORK_DESCRIPTION = [
@@ -315,6 +325,49 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           transport: args.transport,
         },
         ports,
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        structuredContent: { ...result },
+        isError: result.isError,
+      };
+    },
+  );
+
+  server.registerTool(
+    "study_course",
+    {
+      title: "Finish a whole course in one call (T1, no model in the loop)",
+      description: STUDY_COURSE_DESCRIPTION,
+      inputSchema: {
+        course_id: z.string().describe("Course id"),
+        term_id: z.string().describe("Term id"),
+        school_short_name: z.string().optional().describe("School short name, e.g. CUPES"),
+        include: z
+          .array(z.enum(["media", "quiz", "discussion"]))
+          .optional()
+          .describe("Which parts to run; default all three"),
+        dry_run: z.boolean().optional().describe("Default false. true only lists what it would do."),
+        discussion_content: z.string().optional().describe('Reply text for discussions; default "1"'),
+        delay_ms: z.number().optional().describe("Pause between units (default 800)"),
+        max_units: z.number().optional().describe("Safety cap on units processed in this call (default 400)"),
+        verbose: z.boolean().optional().describe("Include per-unit results (much larger payload)"),
+      },
+    },
+    async (args) => {
+      const result = await studyCourse(
+        {
+          course_id: args.course_id,
+          term_id: args.term_id,
+          school_short_name: args.school_short_name,
+          include: args.include,
+          dry_run: args.dry_run,
+          discussion_content: args.discussion_content,
+          delay_ms: args.delay_ms,
+          max_units: args.max_units,
+          verbose: args.verbose,
+        },
+        { ports },
       );
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],

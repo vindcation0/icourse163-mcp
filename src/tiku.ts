@@ -15,6 +15,10 @@
  *    匹配回 id（实测这样最可靠，不要写死选项顺序）。
  */
 
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 export type TikuQuestionType = "single" | "multiple" | "judgement" | "completion" | "unknown";
 
 /** 一道题的题库视角表示；`options` 是换行拼接的选项正文。 */
@@ -404,4 +408,37 @@ function safeJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+/** 题库配置的默认落地位置：放一次，所有调用都能用。 */
+export function defaultTikuConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const xdg = env.XDG_CONFIG_HOME?.trim();
+  const base = xdg != null && xdg.length > 0 ? join(xdg, "icourse163-mcp") : join(home, ".config", "icourse163-mcp");
+  return join(base, "tiku.json");
+}
+
+/**
+ * 从磁盘读题库配置：环境变量 `ICOURSE163_TIKU_FILE` 优先，其次默认路径。
+ *
+ * 返回 `null` 表示"没有配置"（文件不存在或为空），与"配置写坏了"区分开 ——
+ * 后者会抛出可读的解析错误，避免静默降级成"从未命中"。
+ */
+export async function loadTikuConfigFromDisk(
+  options: { env?: NodeJS.ProcessEnv; home?: string } = {},
+): Promise<{ config: TikuConfig; path: string } | null> {
+  const env = options.env ?? process.env;
+  const path = env.ICOURSE163_TIKU_FILE?.trim() || defaultTikuConfigPath(env, options.home ?? homedir());
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+  if (raw.trim() === "") {
+    return null;
+  }
+  return { config: parseTikuConfig(raw), path };
 }
