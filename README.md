@@ -3,7 +3,8 @@
 中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具。**推荐通过 AI agent 调用**：
 14 个 MCP 工具覆盖登录、刷课、读题、答题提交、单元作业、讨论区，外加**一条命令跑完整门课**。
 
-命令行入口（`mooc.py` / `mooc.exe`）**目前只覆盖刷课**，答题与讨论区没有菜单项 —— 见[第 2 节](#2-备选命令行moocpy--moocexe)。
+命令行入口（`mooc.py` / `mooc.exe`）**已经把全部能力都接进来了**（刷课、测验、作业、讨论、一键跑完），
+交互式菜单也能用 —— 见[第 2 节](#2-备选命令行moocpy--moocexe)。
 
 > 技术原理、逆向过程与开发交接**不在本页**，都在仓库里：[docs/STATUS.md](docs/STATUS.md)（接手入口：
 > 现状 / 已验证边界 / 硬事实）、[docs/mcp.md](docs/mcp.md)（工具契约）、[docs/ROADMAP.md](docs/ROADMAP.md)
@@ -149,8 +150,8 @@ get_homework（读题）→ 填答 → save_homework_answers 必调（草稿）
 
 ## 2. 备选：命令行（`mooc.py` / `mooc.exe`）
 
-> ⚠️ **功能不完整**：命令行只覆盖**刷课**（登录、体检、列课、刷进度、设置）。
-> 答题、单元作业、讨论区**没有**菜单入口，只能用 agent 调用。
+> 命令行与 agent 调用**能力等价**：刷课、测验、单元作业、讨论区、一键跑完都在命令行里。
+> 两者共用同一个 MCP 引擎，逻辑不重复实现。
 
 只需要 **Python 3.8+** 和 **Node.js 18.14+**，不需要 `pip install` 任何东西。
 
@@ -171,11 +172,15 @@ python mooc.py auto     # 之后每次：挑一门课，把没学完的视频/�
 | `python mooc.py` | 不带参数时给出编号菜单（同 exe 双击后的界面） |
 | `python mooc.py login` | 登录（约 4 秒，不打开浏览器） |
 | `python mooc.py status` | 会话体检（只读，约 2 秒） |
+| `python mooc.py course [--dry-run] [--answer-mode ...]` | **一键跑完整门课**：刷课 + 随堂测试 + 讨论 + 章节测验 |
+| `python mooc.py quiz [--answer-mode ...]` | 挑一个测验来做；先预览覆盖率，再问要不要提交 |
+| `python mooc.py homework` | 写单元作业：逐题输入正文，默认存草稿 |
+| `python mooc.py discuss [--all] [--content "1"]` | 回复讨论区（`--all` 一次回完） |
 | `python mooc.py auto` | 最省事：挑一门课刷完没学完的 |
 | `python mooc.py courses` | 列出所有课程，拿到 `course_id` / `term_id` |
 | `python mooc.py units <课程ID> <学期ID> [--school XDU]` | 列出课件与完成度 |
 | `python mooc.py study <课程ID> <学期ID> [--school XDU]` | 刷指定课程 |
-| `python mooc.py settings` | 改设置（视频播放 / 密码显示） |
+| `python mooc.py settings` | 改设置（视频播放 / 密码显示 / **题库配置**） |
 | `python mooc.py settings reset` | 恢复默认值 |
 
 ### 2.2 常用选项

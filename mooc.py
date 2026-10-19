@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -724,6 +725,7 @@ def settings_menu() -> None:
             [
                 f"视频播放设置    上报={mode}，倍速={video['rate']}",
                 f"密码显示设置    输入密码时{'可见' if visible else '不显示'}",
+                "题库配置        " + ("已配置" if tiku_status()[0] else "未配置"),
                 "恢复默认值",
             ],
             extra=f"   配置文件：{SETTINGS_PATH}",
@@ -735,6 +737,8 @@ def settings_menu() -> None:
         elif picked == 1:
             settings_display_menu()
         elif picked == 2:
+            settings_tiku_menu()
+        elif picked == 3:
             confirm = ask_choice("确定恢复默认值吗？", ["确定，删除配置文件"], back_label="取消")
             if confirm == 0:
                 try:
@@ -756,7 +760,11 @@ def main_actions(args: argparse.Namespace) -> list[tuple[str, object]]:
     没有这一项，他就只能干看着了。
     """
     return [
-        ("开始刷课（挑一门课，把没学完的刷完）", lambda: cmd_auto(args)),
+        ("一键跑完整门课（刷课 + 随堂测试 + 讨论 + 章节测验）", lambda: cmd_course(args)),
+        ("做题（挑一个测验，选答题方式）", lambda: cmd_quiz(args)),
+        ("写作业（逐题输入答案）", lambda: cmd_homework(args)),
+        ("回复讨论区", lambda: cmd_discuss(args)),
+        ("开始刷课（只刷视频/文档）", lambda: cmd_auto(args)),
         ("查看状态（登录还有效吗）", cmd_status),
         ("列出我的课程", cmd_courses),
         ("设置（视频播放 / 密码显示）", settings_menu),
@@ -810,6 +818,298 @@ def post_login_menu(args: argparse.Namespace) -> None:
         print("   下一步：python mooc.py auto（刷课）或 python mooc.py status（体检）")
         return
     run_menu(args)
+
+
+# --------------------------------------------------------------------------- #
+# 答题 / 作业 / 讨论 / 一键跑完（都通过 MCP 工具，逻辑不在本脚本里重复实现）
+# --------------------------------------------------------------------------- #
+
+TIKU_PATH = Path.home() / ".config" / "icourse163-mcp" / "tiku.json"
+
+ANSWER_MODES = [
+    ("paper —— 只用试卷自带答案（随堂测试有，最快最准，不查题库）", "paper"),
+    ("tiku  —— 只用题库（忽略试卷自带答案）", "tiku"),
+    ("auto  —— 试卷答案优先，剩下的查题库（推荐）", "auto"),
+    ("agent —— 我自己答（脚本把题目给我，我逐题输入）", "agent"),
+]
+
+
+def tiku_path() -> Path:
+    """题库配置的实际路径：环境变量优先，其次默认位置。"""
+    override = os.environ.get("ICOURSE163_TIKU_FILE", "").strip()
+    return Path(override) if override else TIKU_PATH
+
+
+def tiku_status() -> tuple[bool, str]:
+    """静态检查题库配置（不发任何请求）。"""
+    path = tiku_path()
+    if not path.exists():
+        return False, f"未配置（{path} 不存在）"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception as exc:  # noqa: BLE001 - 只要可读的诊断
+        return False, f"解析失败：{exc}"
+    entries = data if isinstance(data, list) else (data.get("answerers") or data.get("tiku") or [])
+    names = [str(e.get("name") or e.get("url") or "?") for e in entries if isinstance(e, dict)]
+    if not names:
+        return False, f"文件里没有题库条目（{path}）"
+    return True, f"{len(names)} 个题库：{'、'.join(names)}"
+
+
+def pick_answer_mode() -> str | None:
+    picked = ask_choice("谁来答题？", [label for label, _ in ANSWER_MODES], back_label="返回")
+    return None if picked is None else ANSWER_MODES[picked][1]
+
+
+def fetch_kind(mcp: Mcp, kind: str) -> list[dict]:
+    result = mcp.call("list_todos", {})
+    return [t for t in result.get("todos", []) if t.get("kind") == kind]
+
+
+def choose_todo(items: list[dict], kind: str) -> dict | None:
+    if not items:
+        print(f"   没有待做的{kind}。")
+        return None
+    labels = []
+    for item in items:
+        title = str(item.get("title", ""))[:34]
+        labels.append(f"{title}（{item.get('course_title', '')}）")
+    picked = ask_choice(f"选一个{kind}？", labels, back_label="返回")
+    return None if picked is None else items[picked]
+
+
+def report_answers(questions: list[dict], limit: int = 3) -> None:
+    """把每题答案的来源标出来 —— paper / tiku / agent / 空。"""
+    shown = 0
+    for q in questions:
+        src = q.get("source") or "未答"
+        title = str(q.get("title", ""))[:30]
+        answer = str(q.get("answer") or "")[:24]
+        mark = {"paper": "平台", "tiku": "题库", "agent": "你"}.get(str(src), "—")
+        print(f"     [{mark}] {title}  →  {answer or '（空）'}")
+        shown += 1
+        if shown >= limit:
+            break
+    if len(questions) > shown:
+        print(f"     …… 还有 {len(questions) - shown} 题")
+
+
+def cmd_quiz(args: argparse.Namespace) -> None:
+    """测验/单元测试：列出来 → 选一个 → 选答题方式 → 预览 → 可选提交。"""
+    with Mcp(timeout=args.timeout or ADVANCED_DEFAULTS["timeout"]) as mcp:
+        check_session(mcp)
+        items = fetch_kind(mcp, "测验")
+        print(f"   待做测验 {len(items)} 个。\n")
+        todo = choose_todo(items, "测验")
+        if todo is None:
+            return
+        print(f"\n   {todo.get('title')}（{todo.get('course_title')}，截止 {todo.get('due_at', '—')}）")
+        mode = args.answer_mode or pick_answer_mode()
+        if mode is None:
+            return
+
+        arguments: dict = {"todo_id": todo["id"], "answer_mode": mode, "submit": False}
+        if args.school:
+            arguments["school_short_name"] = args.school
+        preview = mcp.call("solve_quiz", arguments)
+        answered = preview.get("answered", 0)
+        total = preview.get("question_count", 0)
+        coverage = float(preview.get("coverage") or 0.0)
+        print(f"\n   预览：{answered}/{total} 题有答案，覆盖率 {coverage * 100:.0f}%（来源 {preview.get('answer_mode')}）")
+        report_answers(preview.get("questions", []))
+        if preview.get("status") in ("questions",):
+            print("\n   agent 模式：请改用 `mooc.py homework` 的流程逐题输入，或先用题库方式。")
+            return
+        if answered == 0:
+            print("\n   一题都没答上，不提交。")
+            return
+        if args.dry_run:
+            print("\n   --dry-run：到此为止，没有提交。")
+            return
+        if not ask_yes("要正式提交吗？（会消耗一次作答机会）"):
+            print("   已取消。")
+            return
+        arguments["submit"] = True
+        final = mcp.call("solve_quiz", arguments)
+        print(f"\n   提交结果：{final.get('status')}  已交={final.get('submitted')}")
+        for err in final.get("errors", []):
+            print(f"     ! {err.get('message')}")
+
+
+def cmd_homework(args: argparse.Namespace) -> None:
+    """单元作业：读题 → 逐题输入正文 → 草稿或提交。"""
+    with Mcp(timeout=args.timeout or ADVANCED_DEFAULTS["timeout"]) as mcp:
+        check_session(mcp)
+        items = fetch_kind(mcp, "作业")
+        print(f"   待做作业 {len(items)} 个。\n")
+        todo = choose_todo(items, "作业")
+        if todo is None:
+            return
+        reading: dict = {"todo_id": todo["id"]}
+        if args.school:
+            reading["school_short_name"] = args.school
+        paper = mcp.call("solve_homework", reading)
+        questions = paper.get("questions", [])
+        print(f"\n   {paper.get('title')}  共 {len(questions)} 题\n")
+        answers = []
+        for q in questions:
+            print(f"   —— 第 {int(q.get('index', 0)) + 1} 题 ——")
+            print(f"   {q.get('title')}\n")
+            if q.get("options"):
+                for opt in q["options"]:
+                    print(f"     {opt.get('id')}: {opt.get('content')}")
+                text = input("   输入选项 id（多个用逗号分隔，直接回车跳过）：").strip()
+                if text:
+                    answers.append({"question_id": q["question_id"], "option_ids": [x.strip() for x in text.split(",") if x.strip()]})
+            else:
+                print("   （输入正文，单独一行 `.` 结束；直接回车跳过）")
+                lines: list[str] = []
+                while True:
+                    line = input("   > ")
+                    if line.strip() == ".":
+                        break
+                    if line == "" and not lines:
+                        break
+                    lines.append(line)
+                body = "\n".join(lines).strip()
+                if body:
+                    answers.append({"question_id": q["question_id"], "text": body})
+            print()
+
+        if not answers:
+            print("   没有输入任何答案，退出。")
+            return
+        arguments = {"todo_id": todo["id"], "answers": answers, "submit": False}
+        if args.school:
+            arguments["school_short_name"] = args.school
+        if args.dry_run:
+            print(f"   --dry-run：已收集 {len(answers)} 题答案，未写入。")
+            return
+        if not ask_yes("要正式提交吗？（作业通常只有一次机会）"):
+            saved = mcp.call("solve_homework", arguments)
+            print(f"   已存草稿：{saved.get('status')}（草稿已存={saved.get('draft_saved')}）")
+            return
+        arguments["submit"] = True
+        final = mcp.call("solve_homework", arguments)
+        print(f"\n   提交结果：{final.get('status')}  已交={final.get('submitted')}")
+        for err in final.get("errors", []):
+            print(f"     ! {err.get('message')}")
+
+
+def cmd_discuss(args: argparse.Namespace) -> None:
+    """讨论区：列出未完成的讨论单元 → 逐个回复（默认内容 "1"）。"""
+    with Mcp(timeout=args.timeout or ADVANCED_DEFAULTS["timeout"]) as mcp:
+        check_session(mcp)
+        courses = mcp.call("list_courses", {}).get("courses", [])
+        if not courses:
+            print("   没有已选课程。")
+            return
+        course_id, term_id, school = pick_course(mcp, args.course, args.term)
+        units = mcp.call(
+            "list_discussion_units",
+            {"course_id": course_id, "term_id": term_id, "school_short_name": school},
+        )
+        if units.get("status") != "ok":
+            print(f"   取不到讨论单元：{units.get('status')}")
+            print("   提示：讨论区需要**浏览器登录**的会话，先运行 `mooc.py login --browser` 或调 login 工具。")
+            return
+        pending = [u for u in units.get("units", []) if not u.get("completed")]
+        done = len(units.get("units", [])) - len(pending)
+        print(f"   讨论单元：已完成 {done}，待做 {len(pending)}\n")
+        if not pending:
+            return
+        labels = [f"{str(u.get('name', ''))[:38]}" for u in pending]
+        picked = ask_choice(
+            "要回复哪个？", labels, extra="   要一次回复全部，请用：mooc.py discuss --all", back_label="返回"
+        )
+        if picked is None:
+            return
+        targets = [pending[picked]] if not args.all else pending
+        content = args.content or "1"
+        if picked == "all":
+            print(f"\n   将对 {len(targets)} 个讨论各回复一句：{content!r}")
+            if not ask_yes("确认全部回复？"):
+                return
+        for unit in targets:
+            result = mcp.call(
+                "reply_discussion",
+                {
+                    "course_id": course_id,
+                    "term_id": term_id,
+                    "unit_id": unit["unit_id"],
+                    "content": content,
+                    "school_short_name": school,
+                },
+            )
+            status = result.get("status")
+            mark = "✅" if status in ("ok", "already_complete") else "✗"
+            print(f"   {mark} {str(unit.get('name', ''))[:30]}  {status}")
+
+
+def cmd_course(args: argparse.Namespace) -> None:
+    """一键跑完整门课（T1）。"""
+    with Mcp(timeout=args.timeout or 900.0) as mcp:
+        check_session(mcp)
+        course_id, term_id, school = pick_course(mcp, args.course, args.term)
+        arguments: dict = {
+            "course_id": course_id,
+            "term_id": term_id,
+            "school_short_name": school,
+            "dry_run": True,
+        }
+        if args.answer_mode:
+            arguments["answer_mode"] = args.answer_mode
+        plan = mcp.call("study_course", arguments)
+        counts = plan.get("counts", {})
+        planned = counts.get("planned", {})
+        total = sum(int(planned.get(k, 0) or 0) for k in ("media", "quiz", "discussion", "chapter_quiz"))
+        print(
+            f"\n   单元 {counts.get('units_total')}，已完成 {counts.get('units_complete_before')}，"
+            f"待处理 {total}"
+        )
+        print(
+            f"   其中 视频/文档={planned.get('media', 0)}  随堂测试={planned.get('quiz', 0)}  "
+            f"讨论={planned.get('discussion', 0)}  章节测验={planned.get('chapter_quiz', 0)}"
+        )
+        if total == 0:
+            print("\n   这门课没有要做的了。")
+            return
+        if args.dry_run:
+            print("\n   --dry-run：到此为止。")
+            return
+        if not ask_yes("开始跑？这会真的写进度"):
+            return
+        arguments["dry_run"] = False
+        result = mcp.call("study_course", arguments)
+        done = result.get("counts", {}).get("done", {})
+        skipped = result.get("counts", {}).get("skipped", {})
+        print(f"\n   完成：视频/文档={done.get('media', 0)} 随堂测试={done.get('quiz', 0)} "
+              f"讨论={done.get('discussion', 0)} 章节测验={done.get('chapter_quiz', 0)}")
+        if sum(int(v or 0) for v in skipped.values()) > 0:
+            print(f"   跳过：{skipped}")
+        for note in result.get("notes", []):
+            print(f"   注意：{note}")
+        for failure in result.get("failures", []):
+            print(f"   ✗ {failure.get('name')} — {failure.get('detail')}")
+
+
+def ask_yes(prompt: str) -> bool:
+    answer = input(f"   {prompt} [y/N] ").strip().lower()
+    return answer in ("y", "yes", "是", "确认")
+
+
+def settings_tiku_menu() -> None:
+    """题库配置：只做状态检查与路径说明（配置文件本身不进菜单编辑）。"""
+    while True:
+        ok, detail = tiku_status()
+        print(f"\n   题库配置：{'✅ ' if ok else '❌ '}{detail}")
+        print(f"   路径：{tiku_path()}")
+        if not ok:
+            print("\n   用法：把题库配置（JSON 数组，兼容 OCS AnswererWrapper）写进上面这个文件。")
+            print("   也可以用环境变量 ICOURSE163_TIKU_FILE 指向别处。")
+        picked = ask_choice("题库", ["重新检查", "返回"], back_label="返回")
+        if picked is None or picked == 1:
+            return
 
 
 def cmd_login(args: argparse.Namespace) -> None:
@@ -992,6 +1292,10 @@ USAGE = """\
 
   python mooc.py login            第一次用，先登录（输账号密码，密码不显示；约 4 秒）
                                   ← 登录成功后会列出编号菜单，输入序号即可继续
+  python mooc.py course           一键跑完整门课：刷课 + 随堂测试 + 讨论 + 章节测验
+  python mooc.py quiz             挑一个测验来做（可选答题方式）
+  python mooc.py homework         写单元作业（逐题输入答案，草稿或提交）
+  python mooc.py discuss          回复讨论区（默认回复内容 "1"）
   python mooc.py auto             最省事：挑一门课，把没学完的视频/文档刷完
   python mooc.py status           看看登录还有效吗
   python mooc.py courses          列出所有课程，拿到 course_id / term_id
@@ -1020,8 +1324,21 @@ study / auto 还能加：
 
 上面这些不填就走"设置"里保存的值；命令行明确写了就覆盖这一次。
 
-提示：刷课只处理视频和文档。测验/讨论需要你自己做，脚本会列出来。
-"""
+提示：`auto`/`study` 只处理视频和文档；测验用 quiz、作业用 homework、讨论用 discuss，
+      或者直接用 `course` 一次跑完。
+
+答题 / 讨论相关：
+  --answer-mode paper   只用试卷自带答案（随堂测试有，最快最准，不查题库）
+  --answer-mode tiku    只用题库（忽略试卷自带答案）
+  --answer-mode auto    试卷答案优先，剩下的查题库（默认行为）
+  --answer-mode agent   你自己答：脚本把题目给你，逐题输入
+  --all                 讨论区：一次回复全部未完成的讨论
+  --content "一句话"     讨论回复内容（默认 "1"）
+  --dry-run             只预览，不提交、不写入
+
+题库配置：写进 ~/.config/icourse163-mcp/tiku.json
+（JSON 数组，兼容 OCS AnswererWrapper；也可用 ICOURSE163_TIKU_FILE 指向别处）。
+python mooc.py settings → 「题库配置」可以检查它有没有被读到。"""
 
 
 def main() -> None:
@@ -1048,6 +1365,14 @@ def main() -> None:
     )
     parser.add_argument("--transport", default="rpc", choices=["rpc", "auto", "playwright"])
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--all", action="store_true", help="讨论区：一次回复全部未完成的讨论")
+    parser.add_argument("--content", default=None, help="讨论回复内容（默认 1）")
+    parser.add_argument(
+        "--answer-mode",
+        default=None,
+        choices=["paper", "tiku", "auto", "agent"],
+        help="答题方式：paper=只用试卷自带答案、tiku=只用题库、auto=兜底、agent=你自己答",
+    )
     parser.add_argument(
         "--delay",
         type=float,
@@ -1121,6 +1446,14 @@ def main() -> None:
         cmd_study(args, interactive=False)
     elif args.command == "auto":
         cmd_auto(args)
+    elif args.command == "course":
+        cmd_course(args)
+    elif args.command == "quiz":
+        cmd_quiz(args)
+    elif args.command == "homework":
+        cmd_homework(args)
+    elif args.command == "discuss":
+        cmd_discuss(args)
     else:
         print(f"{BAD} 不认识这个命令：{args.command}\n")
         print(USAGE)

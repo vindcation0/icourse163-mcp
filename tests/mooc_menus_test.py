@@ -77,11 +77,12 @@ print("=== 1. 已有会话 + 不带参数：给出编号菜单 ===")
 real_session = mooc.SESSION_PATH
 mooc.SESSION_PATH = Path(real_session)  # 真实用户目录里确实有会话
 out = run(["0"], mooc.first_run_menu, args())
-check("列出 1~5 项", all(f"   {i}." in out for i in (1, 2, 3, 4, 5)), out)
+check("列出 1~9 项", all(f"   {i}." in out for i in range(1, 10)), out)
 check("有 0 退出", "   0. 退出" in out, out)
-check("首项是刷课", "1. 开始刷课" in out, out)
-check("第 4 项是设置", "4. 设置" in out, out)
-check("第 5 项是重新登录", "5. 重新登录" in out, out)
+check("首项是一键跑完", "1. 一键跑完整门课" in out, out)
+check("第 5 项是刷课", "5. 开始刷课" in out, out)
+check("第 8 项是设置", "8. 设置" in out, out)
+check("第 9 项是重新登录", "9. 重新登录" in out, out)
 check("退出有反馈", "再见" in out, out)
 
 print("\n=== 1b. 还没有会话时：直接进登录，不摆菜单 ===")
@@ -99,19 +100,19 @@ mooc.SESSION_PATH = real_session
 
 print("\n=== 2. 登录后菜单：与主菜单同一套动作 ===")
 out = run(["0"], mooc.post_login_menu, args())
-check("列出 1~5", all(f"   {i}." in out for i in (1, 2, 3, 4, 5)), out)
-check("第 4 项是设置", "4. 设置" in out, out)
-check("第 5 项是重新登录", "5. 重新登录" in out, out)
+check("列出 1~9", all(f"   {i}." in out for i in range(1, 10)), out)
+check("第 8 项是设置", "8. 设置" in out, out)
+check("第 9 项是重新登录", "9. 重新登录" in out, out)
 check("0 是退出", "   0. 退出" in out, out)
 
 print("\n=== 3. 非法输入：提示并重新列出，不退出 ===")
-out = run(["9", "abc", "0"], mooc.first_run_menu, args())
-check("非法输入有警告", out.count("请输入 1~5") >= 2, out)
+out = run(["99", "abc", "0"], mooc.first_run_menu, args())
+check("非法输入有警告", out.count("请输入 1~9") >= 2, out)
 check("之后仍能正常退出", "再见" in out, out)
 
 print("\n=== 4. 进入设置 → 视频播放设置 → 改成「分块上报」并落盘 ===")
 out = run(["1", "1", "2", "0", "0", "0"], mooc.settings_menu)
-check("设置主菜单有 3 组", "1. 视频播放设置" in out and "2. 密码显示设置" in out and "3. 恢复默认值" in out, out)
+check("设置主菜单有 4 组", "1. 视频播放设置" in out and "2. 密码显示设置" in out and "3. 题库配置" in out and "4. 恢复默认值" in out, out)
 check("视频子菜单有上报方式/倍速/停顿", "上报方式" in out and "视频倍速" in out and "单元之间停顿" in out, out)
 check("有分块选项", "分块上报" in out, out)
 check("保存提示", "已保存到" in out, out)
@@ -179,7 +180,7 @@ check("打印一行提示而不是提问", "下一步" in buf.getvalue() and "�
 
 print("\n=== 11. 恢复默认值 ===")
 mooc.SETTINGS_PATH.write_text(json.dumps({"video": {"chunk": 60}}), encoding="utf-8")
-out = run(["3", "1"], mooc.settings_menu)
+out = run(["4", "1"], mooc.settings_menu)
 check("确认后删除文件", not mooc.SETTINGS_PATH.exists(), out)
 
 
