@@ -47,6 +47,13 @@ export type AnswererWrapper = {
 
 export type TikuConfig = AnswererWrapper[];
 
+/**
+ * 额度耗尽的信号。言溪这类题库在免费次数用完后会回一句
+ * "题库次数余额不足, 请前往=> …充值" —— 这不是"没命中"，继续问下一题纯属浪费
+ * （实测 20 题全部白跑，一个 4 卷的批量能烧掉几分钟却毫无产出）。
+ */
+export const TIKU_EXHAUSTED_RE = /余额不足|次数不足|充值|余额已用完|quota|insufficient/i;
+
 export type TikuLookup = {
   /** 命中的答案文本；null 表示没命中。 */
   answer: string | null;
@@ -54,6 +61,8 @@ export type TikuLookup = {
   answerer: string | null;
   /** 题库返回的提示信息（`[msg, undefined]` 形态），或本地错误说明。 */
   note: string | null;
+  /** 是否是"额度耗尽"这类**不可重试**的拒绝；true 时调用方应立即停止批量。 */
+  exhausted?: boolean;
 };
 
 /** 判断题的真/假同义词表，抄自 chaoxing 的 answer_check.py。 */
@@ -315,7 +324,7 @@ export function interpretHandlerResult(result: unknown): TikuLookup {
       return { answer: text, answerer: null, note: null };
     }
   }
-  return { answer: null, answerer: null, note };
+  return { answer: null, answerer: null, note, exhausted: note != null && TIKU_EXHAUSTED_RE.test(note) };
 }
 
 export type TikuFetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => Promise<{ status: number; text: string }>;

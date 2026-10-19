@@ -22,6 +22,9 @@ const UNITS: Unit[] = [
   { id: "u4", name: "讨论1", contentType: 6, contentId: "c4", completePercent: 0, viewStatus: "not-viewed" },
 ];
 
+/** 章节测验夹具：默认空，需要时按用例注入。 */
+const QUIZZES: { id: string; name: string; usedTryCount: number; trytime: number; viewStatus: string; totalScore: number | null; userScore: number | null }[] = [];
+
 function deps(overrides: Partial<Parameters<typeof studyCourse>[1]> = {}) {
   const calls: string[] = [];
   return {
@@ -38,6 +41,11 @@ function deps(overrides: Partial<Parameters<typeof studyCourse>[1]> = {}) {
       },
       discussOne: async ({ unit }: { unit: Unit }) => {
         calls.push(`discuss:${unit.id}`);
+        return { ok: true, detail: "ok" };
+      },
+      listQuizzes: async () => QUIZZES,
+      chapterQuizOne: async ({ quiz }: { quiz: { id: string } }) => {
+        calls.push(`chapter:${quiz.id}`);
         return { ok: true, detail: "ok" };
       },
       sleep: async () => undefined,
@@ -79,7 +87,7 @@ describe("studyCourse", () => {
     const out = await studyCourse({ ...COURSE, dry_run: true }, d);
     assert.equal(out.status, "dry_run");
     assert.equal(calls.length, 0, "dry run 不能产生任何写操作");
-    assert.deepEqual(out.counts.planned, { media: 1, quiz: 1, discussion: 1 });
+    assert.deepEqual(out.counts.planned, { media: 1, quiz: 1, discussion: 1, chapter_quiz: 0 });
     assert.equal(out.counts.units_complete_before, 1);
   });
 
@@ -88,7 +96,7 @@ describe("studyCourse", () => {
     const out = await studyCourse(COURSE, d);
     assert.equal(out.status, "ok", JSON.stringify(out.errors));
     assert.deepEqual(calls.sort(), ["discuss:u4", "media:u1", "quiz:u3"]);
-    assert.deepEqual(out.counts.done, { media: 1, quiz: 1, discussion: 1 });
+    assert.deepEqual(out.counts.done, { media: 1, quiz: 1, discussion: 1, chapter_quiz: 0 });
     assert.equal(out.counts.failed, 0);
   });
 
@@ -97,7 +105,7 @@ describe("studyCourse", () => {
     const out = await studyCourse({ ...COURSE, include: ["media"] }, d);
     assert.deepEqual(calls, ["media:u1"]);
     // planned 的语义是"本次实际要跑的量"，未选中的部分不计入
-    assert.deepEqual(out.counts.planned, { media: 1, quiz: 0, discussion: 0 });
+    assert.deepEqual(out.counts.planned, { media: 1, quiz: 0, discussion: 0, chapter_quiz: 0 });
     assert.equal(out.counts.done.quiz, 0);
   });
 
@@ -133,6 +141,30 @@ describe("studyCourse", () => {
     assert.equal(out.failures[0].unit_id, "u1");
     assert.match(out.failures[0].detail ?? "", /boom/);
     assert.equal(out.status, "partial", "其他部分成功时是 partial 而不是 error");
+  });
+
+  test("chapter quizzes are planned and run, reusing nothing already submitted", async () => {
+    const quizzes = [
+      { id: "q1", name: "未做测验", usedTryCount: 0, trytime: 20, viewStatus: "0", totalScore: 100, userScore: null },
+      { id: "q2", name: "已交测验", usedTryCount: 1, trytime: 20, viewStatus: "5", totalScore: 100, userScore: 25 },
+      { id: "q3", name: "次数用完", usedTryCount: 20, trytime: 20, viewStatus: "0", totalScore: 100, userScore: null },
+    ];
+    const calls: string[] = [];
+    const d = {
+      listUnits: async () => [],
+      listQuizzes: async () => quizzes,
+      chapterQuizOne: async ({ quiz }: { quiz: { id: string } }) => {
+        calls.push(quiz.id);
+        return { ok: true, detail: "ok" };
+      },
+      sleep: async () => undefined,
+    } as never;
+    // 单元为空会被当成 no_units，所以给一个已完成的单元骗过前置检查
+    const d2 = { ...(d as object), listUnits: async () => [UNITS[1]] } as never;
+    const out = await studyCourse({ ...COURSE, include: ["chapter_quiz"] }, d2);
+    assert.deepEqual(calls, ["q1"], "只做未交且还有次数的");
+    assert.equal(out.counts.done.chapter_quiz, 1);
+    assert.ok(out.notes.some((n) => n.includes("已交过")));
   });
 
   test("respects max_units and says so", async () => {

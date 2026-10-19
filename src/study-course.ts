@@ -26,8 +26,11 @@ import { solveQuiz } from "./solve-quiz";
 import { studyUnit } from "./study-unit";
 import type { Icourse163Ports } from "./ports";
 
-/** media = 视频/文档；quiz = 随堂测试；discussion = 讨论区。 */
-export type StudyCoursePart = "media" | "quiz" | "discussion";
+/**
+ * media = 视频/文档；quiz = 随堂测试（单元级）；discussion = 讨论区；
+ * chapter_quiz = 章节测验（挂在 `chapters.quizs`，**不在单元树里**）。
+ */
+export type StudyCoursePart = "media" | "quiz" | "discussion" | "chapter_quiz";
 
 export type StudyCourseArgs = {
   course_id: string;
@@ -47,10 +50,53 @@ export type StudyCourseArgs = {
   verbose?: boolean;
 };
 
+/** 章节测验：catalog id 就是 todo_id 的 content_id，tid 在 test.contentId。 */
+export type ChapterQuizRow = {
+  id: string;
+  name: string;
+  usedTryCount: number;
+  trytime: number;
+  viewStatus: string;
+  totalScore: number | null;
+  userScore: number | null;
+};
+
+/** 从 mocTermDto 里摊平出章节测验（导出便于单测）。 */
+export function flattenChapterQuizzes(moc: unknown): ChapterQuizRow[] {
+  const root = asRec(moc) ?? {};
+  const result = asRec(root.result) ?? root;
+  const rows: ChapterQuizRow[] = [];
+  for (const chapter of asArr(result.chapters)) {
+    const ch = asRec(chapter);
+    if (ch == null) continue;
+    for (const raw of asArr(ch.quizs)) {
+      const q = asRec(raw);
+      if (q == null) continue;
+      const id = asStr(q.id);
+      if (id === "") continue;
+      const test = asRec(q.test) ?? {};
+      const used = Number(test.usedTryCount);
+      const limit = Number(test.trytime);
+      const total = Number(test.totalScore);
+      const mine = Number(test.userScore);
+      rows.push({
+        id,
+        name: asStr(q.name),
+        usedTryCount: Number.isFinite(used) ? used : 0,
+        trytime: Number.isFinite(limit) ? limit : 0,
+        viewStatus: asStr(q.viewStatus),
+        totalScore: Number.isFinite(total) ? total : null,
+        userScore: Number.isFinite(mine) ? mine : null,
+      });
+    }
+  }
+  return rows;
+}
+
 export type StudyCourseItemResult = {
   unit_id: string;
   name: string;
-  kind: "media" | "quiz" | "discussion";
+  kind: StudyCoursePart;
   outcome: "done" | "skipped_done" | "skipped_no_answer" | "skipped_no_session" | "failed" | "would_run";
   detail?: string;
 };
@@ -150,6 +196,10 @@ export type StudyCourseDeps = {
   studyOne?: (args: { unit: UnitRow; course: StudyCourseArgs }) => Promise<{ ok: boolean; detail: string }>;
   quizOne?: (args: { unit: UnitRow; course: StudyCourseArgs }) => Promise<{ ok: boolean; detail: string; skip?: "no_answer" | "no_session" }>;
   discussOne?: (args: { unit: UnitRow; course: StudyCourseArgs }) => Promise<{ ok: boolean; detail: string; skip?: "no_answer" | "no_session" }>;
+  /** 覆盖用：读章节测验列表。 */
+  listQuizzes?: (args: StudyCourseArgs) => Promise<ChapterQuizRow[]>;
+  /** 覆盖用：做一道章节测验。 */
+  chapterQuizOne?: (args: { quiz: ChapterQuizRow; course: StudyCourseArgs }) => Promise<{ ok: boolean; detail: string; skip?: "no_answer" | "no_session" }>;
   sleep?: (ms: number) => Promise<void>;
 };
 
@@ -160,7 +210,7 @@ export type StudyCourseDeps = {
  * `contentType` 的媒体/测验/讨论里，所以不会被误触。
  */
 export async function studyCourse(args: StudyCourseArgs, deps: StudyCourseDeps = {}): Promise<StudyCourseResult> {
-  const parts: StudyCoursePart[] = args.include?.length ? args.include : ["media", "quiz", "discussion"];
+  const parts: StudyCoursePart[] = args.include?.length ? args.include : ["media", "quiz", "discussion", "chapter_quiz"];
   const dryRun = args.dry_run === true;
   const discussionContent = (args.discussion_content ?? "1").trim() || "1";
   const delayMs = Math.max(0, args.delay_ms ?? 800);
@@ -177,9 +227,9 @@ export async function studyCourse(args: StudyCourseArgs, deps: StudyCourseDeps =
       units_total: 0,
       units_complete_before: 0,
       units_complete_after: null,
-      planned: { media: 0, quiz: 0, discussion: 0 },
-      done: { media: 0, quiz: 0, discussion: 0 },
-      skipped: { media: 0, quiz: 0, discussion: 0 },
+      planned: { media: 0, quiz: 0, discussion: 0, chapter_quiz: 0 },
+      done: { media: 0, quiz: 0, discussion: 0, chapter_quiz: 0 },
+      skipped: { media: 0, quiz: 0, discussion: 0, chapter_quiz: 0 },
       failed: 0,
     },
     failures: [],
@@ -218,7 +268,7 @@ export async function studyCourse(args: StudyCourseArgs, deps: StudyCourseDeps =
     if (isComplete(u)) continue;
     todo.push(u);
   }
-  const planned = { media: 0, quiz: 0, discussion: 0 };
+  const planned = { media: 0, quiz: 0, discussion: 0, chapter_quiz: 0 };
   for (const u of todo) {
     const part = classifyUnit(u.contentType);
     if (part != null) planned[part] += 1;
@@ -289,6 +339,80 @@ export async function studyCourse(args: StudyCourseArgs, deps: StudyCourseDeps =
 
     if (index < picked.length - 1) {
       await doSleep(delayMs);
+    }
+  }
+
+  // ---- 章节测验（不在单元树里，单独一轮） ----
+  if (parts.includes("chapter_quiz")) {
+    let quizzes: ChapterQuizRow[] = [];
+    try {
+      quizzes = deps.listQuizzes
+        ? await deps.listQuizzes(args)
+        : flattenChapterQuizzes(
+            await fetchMocTermDto({
+              http: (deps.ports?.http ?? (await defaultHttp())) as never,
+              cookie: await defaultCookie(deps),
+              csrfKey: await defaultCsrf(deps),
+              course: { course_id: args.course_id, term_id: args.term_id, school_short_name: args.school_short_name ?? "" },
+            }),
+          );
+    } catch (error) {
+      result.errors.push({ where: "chapter_quizzes", message: error instanceof Error ? error.message : String(error) });
+    }
+
+    // 只做"还没交过 + 还有次数"的。已经交过的**不重做** —— 重做会消耗次数且可能降低已有分数。
+    const pendingQuizzes = quizzes.filter((q) => {
+      if (q.viewStatus === "5" || q.viewStatus === "completed") return false;
+      if (q.trytime > 0 && q.usedTryCount >= q.trytime) return false;
+      return true;
+    });
+    const alreadyDone = quizzes.length - pendingQuizzes.length;
+    result.counts.planned.chapter_quiz = pendingQuizzes.length;
+    if (alreadyDone > 0) {
+      result.notes.push(`${alreadyDone} 个章节测验已交过，跳过（不重做，避免消耗次数和拉低已有分数）`);
+    }
+
+    const chapterQuizOne =
+      deps.chapterQuizOne ??
+      (async ({ quiz }: { quiz: ChapterQuizRow; course: StudyCourseArgs }) =>
+        defaultChapterQuizOne(quiz, args, deps));
+
+    let tikuDead = false;
+    for (const [index, quiz] of pendingQuizzes.entries()) {
+      if (tikuDead) {
+        // 额度已耗尽：剩下的不再尝试，标记为跳过，避免白跑几十次请求。
+        const skipped: StudyCourseItemResult = { unit_id: quiz.id, name: quiz.name, kind: "chapter_quiz", outcome: "skipped_no_answer", detail: "tiku_exhausted" };
+        items.push(skipped);
+        result.counts.skipped.chapter_quiz += 1;
+        continue;
+      }
+      let outcome: StudyCourseItemResult["outcome"] = "failed";
+      let detail = "";
+      try {
+        const r = await chapterQuizOne({ quiz, course: args });
+        outcome = r.ok ? "done" : r.skip === "no_answer" ? "skipped_no_answer" : r.skip === "no_session" ? "skipped_no_session" : "failed";
+        detail = r.detail;
+        if (detail.includes("tiku_exhausted")) {
+          tikuDead = true;
+          result.notes.push("题库额度耗尽，剩余章节测验已跳过（充值后再跑一次即可续上）");
+        }
+      } catch (error) {
+        outcome = "failed";
+        detail = error instanceof Error ? error.message : String(error);
+      }
+      const item: StudyCourseItemResult = { unit_id: quiz.id, name: quiz.name, kind: "chapter_quiz", outcome, detail };
+      items.push(item);
+      if (outcome === "done") {
+        result.counts.done.chapter_quiz += 1;
+      } else if (outcome === "failed") {
+        result.counts.failed += 1;
+        result.failures.push(item);
+      } else {
+        result.counts.skipped.chapter_quiz += 1;
+      }
+      if (index < pendingQuizzes.length - 1) {
+        await doSleep(delayMs);
+      }
     }
   }
 
@@ -409,4 +533,23 @@ async function defaultDiscussOne(
 async function browserCookie(): Promise<string | null> {
   const { createBrowserSessionStore } = await import("./discussion");
   return createBrowserSessionStore().getCookie();
+}
+
+async function defaultChapterQuizOne(
+  quiz: ChapterQuizRow,
+  course: StudyCourseArgs,
+  deps: StudyCourseDeps,
+): Promise<{ ok: boolean; detail: string; skip?: "no_answer" | "no_session" }> {
+  const r = await solveQuiz(
+    {
+      todo_id: `${course.course_id}:${course.term_id}:quiz:${quiz.id}`,
+      school_short_name: course.school_short_name,
+      submit: true,
+    },
+    deps.ports,
+  );
+  if (r.status === "ok") return { ok: true, detail: `${r.status} ${(r.coverage * 100).toFixed(0)}%` };
+  if (r.status === "no_tiku" || r.status === "low_coverage") return { ok: false, detail: `${r.status} ${(r.coverage * 100).toFixed(0)}%`, skip: "no_answer" };
+  if (r.status === "auth_expired") return { ok: false, detail: r.status, skip: "no_session" };
+  return { ok: false, detail: r.status };
 }

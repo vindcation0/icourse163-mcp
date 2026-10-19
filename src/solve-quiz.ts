@@ -75,6 +75,7 @@ export type SolveQuizStatus =
   | "not_found"
   | "incomplete"
   | "exam_out_of_scope"
+  | "tiku_exhausted"
   | "no_attempts_left"
   | "error";
 
@@ -212,6 +213,9 @@ export async function solveQuiz(
     }
   }
 
+  /** 题库额度耗尽的提示；非 null 表示批量应中止。 */
+  let exhaustedNote: string | null = null;
+
   // ② 剩下的才问题库。
   if (config.length > 0) {
     for (const [index, question] of solved.entries()) {
@@ -231,6 +235,11 @@ export async function solveQuiz(
         options: question.options.map((o) => o.content).join("\n"),
       };
       const lookup = await queryTiku(tikuQuestion, config, tikuFetch);
+      if (lookup.exhausted === true) {
+        // 额度耗尽：再问下去每题都是白跑，停下来并如实报告。
+        exhaustedNote = lookup.note ?? "题库额度耗尽";
+        break;
+      }
       if (lookup.answer == null) {
         question.note = lookup.note ?? "题库未命中";
         continue;
@@ -268,6 +277,15 @@ export async function solveQuiz(
     attempts: attemptInfo,
     questions: solved,
   };
+
+  if (exhaustedNote != null) {
+    return {
+      ...result,
+      isError: true,
+      status: "tiku_exhausted",
+      errors: [{ where: "tiku", message: `题库额度耗尽，已中止：${exhaustedNote}` }],
+    };
+  }
 
   if (args.submit !== true) {
     // 有试卷自带答案时，没有题库也不算"缺少题库"
