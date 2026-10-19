@@ -19,8 +19,17 @@ import {
 } from "./homework";
 import type { Icourse163Ports } from "./ports";
 
+/**
+ * 作业的答题方式。**只有 `agent` 是真实可行的** —— 作业全是主观论述题，
+ * 题库里不可能有老师每次现编的题目，试卷也不会在提交前泄露答案。
+ * 传 `tiku` 会被明确拒绝，而不是假装试一下。
+ */
+export type SolveHomeworkAnswerMode = "agent" | "tiku";
+
 export type SolveHomeworkArgs = {
   todo_id: string;
+  /** 显式答题方式；默认 `agent`（答案由调用方给出）。 */
+  answer_mode?: SolveHomeworkAnswerMode;
   /** 不传（或空数组）= 只读题，返回题目清单，不写任何东西。 */
   answers?: SaveAnswerInput[];
   /** true = 直接正式提交；缺省 / false = 只存草稿。由用户决定。 */
@@ -41,6 +50,8 @@ export type SolveHomeworkQuestion = {
   /** 客观题的选项；主观题为空数组。 */
   options: { id: string; content: string }[];
   bank: "objective" | "subjective";
+  /** 答案来源：agent = 调用方传入；null = 没有答案。 */
+  source: "agent" | null;
   /** 提供的答案是否可接受（有正文 / 有选项）。 */
   answer_ok: boolean;
   /** 被拒的原因，或 null。 */
@@ -98,6 +109,21 @@ export async function solveHomework(
     submitted: false,
     errors: [],
   };
+
+  if ((args.answer_mode ?? "agent") === "tiku") {
+    return {
+      ...base,
+      isError: true,
+      status: "unsupported",
+      errors: [
+        {
+          where: "answer_mode",
+          message:
+            "作业全是主观论述题（type 10、无选项），题库无法作答，试卷也不泄露答案。请用 answer_mode: \"agent\" 并由调用方给出正文。",
+        },
+      ],
+    };
+  }
 
   if (parsed?.source === "exam" && args.allow_exam !== true) {
     return {
@@ -247,6 +273,7 @@ function judgeQuestion(q: HomeworkQuestion, answer: SaveAnswerInput | undefined)
     title: (q.stem_text ?? q.title ?? "").trim(),
     options: (q.options ?? []).map((o) => ({ id: o.id, content: o.content })),
     bank: q.bank,
+    source: null as "agent" | null,
   };
   if (answer == null) {
     return { ...base, answer_ok: false, problem: "缺少答案" };
@@ -256,7 +283,7 @@ function judgeQuestion(q: HomeworkQuestion, answer: SaveAnswerInput | undefined)
     if (text === "") {
       return { ...base, answer_ok: false, problem: "主观题需要非空的 text" };
     }
-    return { ...base, answer_ok: true, problem: null };
+    return { ...base, answer_ok: true, problem: null, source: "agent" };
   }
   const optionIds = (answer.option_ids ?? []).map((id) => id.trim()).filter(Boolean);
   if (optionIds.length === 0) {
@@ -267,5 +294,5 @@ function judgeQuestion(q: HomeworkQuestion, answer: SaveAnswerInput | undefined)
   if (unknown.length > 0) {
     return { ...base, answer_ok: false, problem: `option_ids 含未知选项：${unknown.join(", ")}` };
   }
-  return { ...base, answer_ok: true, problem: null };
+  return { ...base, answer_ok: true, problem: null, source: "agent" };
 }

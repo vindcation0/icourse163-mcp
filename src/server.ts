@@ -352,6 +352,10 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         delay_ms: z.number().optional().describe("Pause between units (default 800)"),
         max_units: z.number().optional().describe("Safety cap on units processed in this call (default 400)"),
         verbose: z.boolean().optional().describe("Include per-unit results (much larger payload)"),
+        answer_mode: z
+          .enum(["auto", "paper", "tiku"])
+          .optional()
+          .describe("Passed through to solve_quiz for all quizzes: paper-only is fastest and cannot be wrong for 随堂测试; tiku for chapter quizzes."),
       },
     },
     async (args) => {
@@ -366,6 +370,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           delay_ms: args.delay_ms,
           max_units: args.max_units,
           verbose: args.verbose,
+          answer_mode: args.answer_mode,
         },
         { ports },
       );
@@ -487,6 +492,16 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
       description: SOLVE_QUIZ_DESCRIPTION,
       inputSchema: {
         todo_id: z.string().describe("list_todos id (non-exam)"),
+        answer_mode: z
+          .enum(["auto", "paper", "tiku", "agent"])
+          .optional()
+          .describe(
+            'Explicit answering mode. paper = only the paper\'s own answers (no bank); tiku = only the question bank, ignoring the paper; agent = the caller supplies answers and the tool never guesses; auto (default) = paper first, then bank.',
+          ),
+        answers: z
+          .array(answerItemSchema)
+          .optional()
+          .describe("Required for answer_mode agent: the answers you decided on. Omit to just get the questions back."),
         tiku_config: z
           .string()
           .optional()
@@ -514,6 +529,8 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
       const result = await solveQuiz(
         {
           todo_id: args.todo_id,
+          answer_mode: args.answer_mode,
+          answers: args.answers,
           tiku_config: args.tiku_config,
           submit: args.submit,
           min_coverage: args.min_coverage,
@@ -538,6 +555,10 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
       description: SOLVE_HOMEWORK_DESCRIPTION,
       inputSchema: {
         todo_id: z.string().describe("list_todos id with kind 作业"),
+        answer_mode: z
+          .enum(["agent", "tiku"])
+          .optional()
+          .describe('Default agent. "tiku" is rejected: homework is subjective essays that no bank can hold.'),
         answers: z
           .array(answerItemSchema)
           .optional()
@@ -555,6 +576,7 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
       const result = await solveHomework(
         {
           todo_id: args.todo_id,
+          answer_mode: args.answer_mode,
           answers: args.answers,
           submit: args.submit,
           paper_type: args.paper_type,

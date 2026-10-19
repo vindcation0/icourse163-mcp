@@ -34,8 +34,22 @@ import {
   type TikuQuestionType,
 } from "./tiku";
 
+/**
+ * 答题方式 —— **显式选择，不做模糊优先级**。
+ *
+ * - `paper`：只用试卷自带答案（随堂测试在提交前就返回正确选项），**不查题库**
+ * - `tiku` ：只用题库，**忽略**试卷自带的答案
+ * - `agent`：工具自己不产生任何答案，只把题目返回；提交必须由调用方用 `answers` 给出
+ * - `auto` ：`paper` 优先，剩下的才查题库（历史行为，默认）
+ */
+export type SolveQuizAnswerMode = "auto" | "paper" | "tiku" | "agent";
+
 export type SolveQuizArgs = {
   todo_id: string;
+  /** 显式答题方式；默认 `auto`。见 {@link SolveQuizAnswerMode}。 */
+  answer_mode?: SolveQuizAnswerMode;
+  /** `agent` 模式下由调用方给出的答案。 */
+  answers?: SaveAnswerInput[];
   school_short_name?: string;
   /** 题库配置（JSON 文本）。不传就只读题，不做任何查询。 */
   tiku_config?: string;
@@ -58,8 +72,8 @@ export type SolvedQuestion = {
   /** 答案原文（来自试卷或题库）。 */
   answer: string | null;
   answerer: string | null;
-  /** paper = 平台自己给的答案；tiku = 题库给的；null = 没答上。 */
-  source: "paper" | "tiku" | null;
+  /** paper = 平台自带；tiku = 题库；agent = 调用方传入；null = 没答上。 */
+  source: "paper" | "tiku" | "agent" | null;
   /** 落到提交载荷里的字段。 */
   option_ids: string[];
   text: string | null;
@@ -76,12 +90,15 @@ export type SolveQuizStatus =
   | "incomplete"
   | "exam_out_of_scope"
   | "tiku_exhausted"
+  | "questions"
   | "no_attempts_left"
   | "error";
 
 export type SolveQuizResult = {
   isError: boolean;
   status: SolveQuizStatus;
+  /** 本次用的答题方式（回显，便于审计）。 */
+  answer_mode: SolveQuizAnswerMode;
   todo_id: string;
   title: string | null;
   paper_type: string | null;
@@ -114,6 +131,7 @@ export async function solveQuiz(
   const base: SolveQuizResult = {
     isError: false,
     status: "dry_run",
+    answer_mode: "auto",
     todo_id: todoId,
     title: null,
     paper_type: null,
@@ -192,10 +210,11 @@ export async function solveQuiz(
   const questions = hw.questions ?? [];
   const solved: SolvedQuestion[] = questions.map((q) => toSolved(q));
 
-  // ① 试卷自带答案优先。随堂测试（contentType 5）在**提交前**就返回
-  //    `optionDtos[].answer` 与填空题的 `stdAnswer`，所以这类卷子根本不需要题库；
-  //    章节测验不返回这些字段（实测 0/10），走 ②。
-  for (const [index, question] of solved.entries()) {
+  const answerMode: SolveQuizAnswerMode = args.answer_mode ?? "auto";
+
+  // ① 试卷自带答案：只在 `paper` / `auto` 下使用。
+  //    `tiku` 模式明确要求忽略它（用题库的结果），`agent` 模式完全不产生答案。
+  for (const [index, question] of answerMode === "paper" || answerMode === "auto" ? solved.entries() : []) {
     const platformQuestion = questions[index];
     if (platformQuestion == null) {
       continue;
@@ -216,8 +235,8 @@ export async function solveQuiz(
   /** 题库额度耗尽的提示；非 null 表示批量应中止。 */
   let exhaustedNote: string | null = null;
 
-  // ② 剩下的才问题库。
-  if (config.length > 0) {
+  // ② 题库：只在 `tiku` / `auto` 下使用。
+  if (config.length > 0 && (answerMode === "tiku" || answerMode === "auto")) {
     for (const [index, question] of solved.entries()) {
       if (question.option_ids.length > 0 || (question.text != null && question.text !== "")) {
         continue; // 试卷已经给了答案
@@ -257,6 +276,42 @@ export async function solveQuiz(
     }
   }
 
+  // ③ agent 模式：工具自己不产生答案。调用方给了 `answers` 就用它，没给就把题目返回去。
+  if (answerMode === "agent") {
+    const supplied = new Map<string, SaveAnswerInput>();
+    for (const a of args.answers ?? []) {
+      if (a?.question_id != null) supplied.set(String(a.question_id).trim(), a);
+    }
+    if (supplied.size === 0) {
+      // 只读题：让 agent 先看题，再带着 answers 回来。
+      const preview: SolveQuizResult = {
+        ...base,
+        status: "questions",
+        answer_mode: answerMode,
+        title: hw.title ?? null,
+        paper_type: hw.paper_type ?? null,
+        question_count: solved.length,
+        answered: 0,
+        coverage: 0,
+        questions: solved,
+      };
+      return preview;
+    }
+    for (const q of solved) {
+      const a = supplied.get(q.question_id);
+      if (a == null) continue;
+      q.source = "agent";
+      const ids = (a.option_ids ?? []).map((x) => x.trim()).filter(Boolean);
+      if (ids.length > 0) {
+        q.option_ids = ids;
+        q.answer = ids.join("#");
+      } else if (a.text != null && a.text.trim() !== "") {
+        q.text = a.text.trim();
+        q.answer = q.text;
+      }
+    }
+  }
+
   const answered = solved.filter((q) => q.option_ids.length > 0 || (q.text != null && q.text !== "")).length;
   const coverage = solved.length === 0 ? 0 : answered / solved.length;
 
@@ -269,6 +324,7 @@ export async function solveQuiz(
   const result: SolveQuizResult = {
     ...base,
     status: "dry_run",
+    answer_mode: answerMode,
     title: hw.title ?? null,
     paper_type: hw.paper_type ?? null,
     question_count: solved.length,

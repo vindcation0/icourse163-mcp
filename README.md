@@ -58,7 +58,7 @@ Windows 用 `scripts/run-mcp.cmd`，POSIX 用 `scripts/run-mcp.sh`。
 |---|---|---|
 | `study_unit` | `course_id` `term_id` `unit_id` `school_short_name?` `playback_rate?` `page_interval_sec?` `skip_to_end?` `report_chunk_sec?` `transport?` | 推进视频/文档进度。`transport` 默认 **`auto`**（rpc 优先，失败会**尝试拉起 Chrome**）；只想纯 HTTP 就显式传 `"rpc"` |
 | `list_term_units` | `course_id` `term_id` `school_short_name?` | 课件目录：`type`（video/doc/quiz/other）与完成度 |
-| `study_course` | `course_id` `term_id` `school_short_name?` `include?` `dry_run?` `discussion_content?` `delay_ms?` `max_units?` `verbose?` | **一键跑完整门课**（T1）：模型不在循环里。默认**真的会跑**；`dry_run:true` 只列计划 |
+| `study_course` | `course_id` `term_id` `school_short_name?` `include?` `dry_run?` `discussion_content?` `delay_ms?` `max_units?` `verbose?` **`answer_mode?`** | **一键跑完整门课**（T1）：模型不在循环里。默认**真的会跑**；`answer_mode` 透传给所有测验 |
 
 #### 答题（5 个）
 
@@ -67,8 +67,8 @@ Windows 用 `scripts/run-mcp.cmd`，POSIX 用 `scripts/run-mcp.sh`。
 | `get_homework` | `todo_id` `paper_type?` `school_short_name?` | 读题 |
 | `save_homework_answers` | `todo_id` `answers[]` `paper_type?` `school_short_name?` | 存草稿（`preview:true`），**不可能正式提交** |
 | `submit_homework` | `todo_id` `answers[]` `paper_type?` `school_short_name?` `allow_exam?` | 正式提交；单元级随堂测试会**自动补任务点上报** |
-| `solve_quiz` | `todo_id` `tiku_config?` `submit?` `min_coverage?` `paper_type?` `school_short_name?` `allow_exam?` | **测验**全流程。默认 dry-run |
-| `solve_homework` | `todo_id` `answers?` `submit?` `paper_type?` `school_short_name?` `allow_exam?` | **单元作业**全流程。默认存草稿 |
+| `solve_quiz` | `todo_id` **`answer_mode?`** `answers?` `tiku_config?` `submit?` `min_coverage?` `paper_type?` `school_short_name?` `allow_exam?` | **测验**全流程。`answer_mode` 显式选 `paper`/`tiku`/`agent`/`auto`。默认 dry-run |
+| `solve_homework` | `todo_id` **`answer_mode?`** `answers?` `submit?` `paper_type?` `school_short_name?` `allow_exam?` | **单元作业**全流程。`answer_mode` 只接受 `agent`（`tiku` 会被明确拒绝）。默认存草稿 |
 
 **`solve_quiz` 是两段式的**：
 

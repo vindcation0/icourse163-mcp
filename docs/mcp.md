@@ -247,6 +247,21 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - 入参：`todo_id`；`answers[{question_id, text?, option_ids?}]`；可选 `submit`、`paper_type`、
   `school_short_name`、`allow_exam`（默认 false，与 `submit_homework` 同一道闸门）。
 
+## 答题方式：`answer_mode`（四个工具都认）
+
+**显式选择，不做模糊优先级。** 每道题的来源写在 `source` 里，便于审计。
+
+| `answer_mode` | 谁来答 | 会不会查题库 | `source` |
+|---|---|---|---|
+| `paper` | **平台自带答案**（随堂测试在提交前就返回正确选项与填空答案） | ❌ **不查** | `"paper"` |
+| `tiku` | **题库**（忽略试卷自带的答案） | ✅ 只查题库 | `"tiku"` |
+| `agent` | **调用方传入**（工具完全不猜；不给 `answers` 就只返回题目） | ❌ 不查 | `"agent"` |
+| `auto`（默认） | `paper` 优先，剩下的才查题库 | ✅ 兜底 | `"paper"` / `"tiku"` |
+
+- `solve_quiz` / `study_course` 支持 `paper|tiku|agent|auto`；`study_course` 只透传 `paper|tiku|auto`（批量里没有 agent 这一档）。
+- `solve_homework` 只接受 `agent` —— 作业是主观论述题，题库无法作答、试卷也不泄露答案。传 `tiku` 会返回 `unsupported` 而不是假装试一下。
+- 实测同一张随堂测试：`paper` 答 3/3（来源全 `paper`）；`tiku` 答 **0/3** —— 即使试卷自带答案也**一个都不用**；`agent` 不给答案时返回 `status: "questions"`。
+
 ## `solve_quiz`
 
 - 两段式作答：**先用试卷自带的答案**，剩下的才问题库。默认 **dry run**（`submit` 必须显式传 true）。

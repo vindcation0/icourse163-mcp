@@ -48,6 +48,11 @@ export type StudyCourseArgs = {
   max_units?: number;
   /** 逐单元报告（会显著增大返回体）。默认 false，只给汇总 + 失败清单。 */
   verbose?: boolean;
+  /**
+   * 测验的答题方式，透传给 `solve_quiz`：`paper` 只用试卷自带答案（快、100%）、
+   * `tiku` 只用题库、`auto` 兜底。**默认 `auto`。**
+   */
+  answer_mode?: "auto" | "paper" | "tiku";
 };
 
 /** 章节测验：catalog id 就是 todo_id 的 content_id，tid 在 test.contentId。 */
@@ -499,6 +504,7 @@ async function defaultQuizOne(
     {
       todo_id: `${course.course_id}:${course.term_id}:unit:${unit.id}`,
       school_short_name: course.school_short_name,
+      answer_mode: course.answer_mode,
       submit: true,
     },
     deps.ports,
@@ -544,6 +550,7 @@ async function defaultChapterQuizOne(
     {
       todo_id: `${course.course_id}:${course.term_id}:quiz:${quiz.id}`,
       school_short_name: course.school_short_name,
+      answer_mode: course.answer_mode,
       submit: true,
     },
     deps.ports,
