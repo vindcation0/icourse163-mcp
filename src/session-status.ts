@@ -11,6 +11,8 @@ import type { Icourse163Ports } from "./ports";
  * the tools fail in confusingly different ways in each:
  *
  *  1. No session at all            -> every tool returns auth_expired.
+*  1b. Session passes the probe but lists 0 courses -> status "stale": the directory RPCs
+*      answer code 0 with a null result, so every catalog-based tool fails.
  *  2. Valid API token only         -> reads and the signed RPC path work, but the
  *     (NTESSTUDYSI, no STUDY_SESS)   Playwright path cannot reach /learn/ at all,
  *                                    because a plain HTML request gets bounced off
@@ -23,7 +25,14 @@ import type { Icourse163Ports } from "./ports";
  * because that can hit the logout endpoint and invalidate a working session, and it
  * never writes progress (use `npm run check:rpc` for the signed-write check).
  */
-export type SessionStatusValue = "ok" | "auth_expired" | "error";
+/**
+ * `stale` = 面板 RPC 成功了，但**一门课都没有**。
+ *
+ * 实测遇到过这种状态：`code: 0`、`result: null`、`course_count: 0`，而所有基于目录的工具
+ * 都会失败。原来的实现把它报成 `ok`，于是任何"先查 status 再决定"的调用方都会被误导 ——
+ * 并发测试因此差点得出错误结论。
+ */
+export type SessionStatusValue = "ok" | "stale" | "auth_expired" | "error";
 
 export type SessionStatusResult = {
   isError: boolean;
@@ -135,6 +144,25 @@ export async function sessionStatus(ports?: Icourse163Ports): Promise<SessionSta
   }
 
   const courseCount = panels.courses.length;
+
+  // 面板成功但一门课都没有 = 半死会话。这不是"可用"，因为所有基于目录的工具都会失败。
+  if (courseCount === 0) {
+    return {
+      isError: true,
+      status: "stale",
+      stored: true,
+      cookies,
+      // api 也标成 stale：CLI 的 check_session / cmd_status 都看 `api == "ok"`，
+      // 只改 status 会让它们继续放行半死会话。
+      api: "stale",
+      course_count: 0,
+      web_session_markers: webSessionMarkers,
+      guidance:
+        "会话能通过体检，但一门课都没有 —— 这是**半死会话**：目录类 RPC 会返回 code 0 加 result null，" +
+        "刷课/答题/讨论全部失败。请重新登录（`npm run login` 或 MCP 的 login 工具），不要把它当成可用会话。",
+      errors: [],
+    };
+  }
   // Both branches point at transport=rpc, because the browser path cannot be promised from
   // cookies alone. Measured: both markers present yet /learn/ bounced to logout, while a
   // pure-HTTP login still drove the signed RPC fine.

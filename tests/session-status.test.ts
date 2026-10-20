@@ -105,11 +105,16 @@ describe("sessionStatus", () => {
     assert.match(result.guidance, /very unlikely to work/);
   });
 
-  test("an empty course panel is ok with zero courses, not an error", async () => {
+  // 这个用例原来断言"0 门课也算 ok"。实测推翻了它：0 门课正是半死会话的签名，
+  // 目录类 RPC 会返回 code 0 + result null，所有基于目录的工具全部失败。
+  // 现在要求报 stale，否则"先查 status 再决定"的调用方会被误导（并发测试就被误导过一次）。
+  test("an empty course panel is stale, not a usable session", async () => {
     const { http } = happyHttp(EMPTY_COURSE_PANEL_BODY);
     const result = await sessionStatus(portsWith(async () => FULL_SESSION, http));
-    assert.equal(result.isError, false);
+    assert.equal(result.status, "stale");
+    assert.equal(result.isError, true);
     assert.equal(result.course_count, 0);
+    assert.match(result.guidance, /重新登录|half|半死/i);
   });
 
   test("an expired session reports auth_expired and keeps the cookie markers", async () => {

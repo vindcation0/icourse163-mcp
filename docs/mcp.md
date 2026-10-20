@@ -134,7 +134,9 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - 关键区分（这是本项目最容易误判的状态）：
   - 只有 `NTESSTUDYSI` → **API 调用与签名 RPC 路径可用**，但 Playwright 路径不可用。因为网页会话缺失时，普通 HTML 请求会被弹离 `/learn/`，于是 `list_courses` 一切正常而 `study_unit` 报「找不到视频元素」。
   - `STUDY_INFO` + `STUDY_SESS` 齐全 → 两条路径都可用。
-- `status: ok` = 可用；`auth_expired` = 需要 `npm run login`。
+- `status: ok` = 可用；`auth_expired` = 需要 `npm run login`；
+  **`stale`** = 体检通过但**一门课都没有**（半死会话：目录 RPC 返回 `code 0` + `result null`，
+  所有基于目录的工具都会失败）→ 同样要重新登录。`api` 字段在 `stale` 时也是 `stale`。
 - 签名写入路径（`saveMocContentLearn`）本身不在这里验证 —— 它需要一次写入，见 `npm run check:rpc`。
 - 不要传账号或 cookie；工具也不返回它们。
 
