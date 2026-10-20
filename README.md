@@ -8,7 +8,8 @@
 
 > 技术原理、逆向过程与开发交接**不在本页**，都在仓库里：[docs/STATUS.md](docs/STATUS.md)（接手入口：
 > 现状 / 已验证边界 / 硬事实）、[docs/mcp.md](docs/mcp.md)（工具契约）、[docs/ROADMAP.md](docs/ROADMAP.md)
-> （优先级与代价）、[docs/HANDOFF.md](docs/HANDOFF.md)（交接报告）、[docs/adr/](docs/adr/)（架构决策与逆向证据）。
+> （优先级与代价）、[docs/HANDOFF.md](docs/HANDOFF.md)（交接报告）、[docs/concurrency.md](docs/concurrency.md)
+> （并发边界实测）、[docs/adr/](docs/adr/)（架构决策与逆向证据）。
 
 ---
 

@@ -334,6 +334,7 @@ python tests/mooc_menus_test.py              # 菜单桩测试，13 组全过
 | [ROADMAP.md](ROADMAP.md) | 优先级、代价表、依赖图、待拍板决策 |
 | [HANDOFF.md](HANDOFF.md) | 逆向硬事实、踩坑史（含三次误读同一个错误码的教训） |
 | [mcp.md](mcp.md) | 14 个工具的契约与状态码语义 |
+| [concurrency.md](concurrency.md) | 并发边界实测：读≥8、**写≈2**，多课程并行不可行 |
 | [login.md](login.md) | 登录细节（纯 HTTP / 浏览器 / cookie 粘贴） |
 | [adr/](adr/) | 5 份架构决策记录（RPC 签名、URS 登录、作业 RPC 等） |
 
