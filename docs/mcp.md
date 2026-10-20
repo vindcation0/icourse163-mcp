@@ -157,6 +157,16 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - `auth_expired` 以及其他失败都是 `isError`。
 - 不要传账号或 cookie。
 
+## `list_courses`
+
+- 入参：`include_schedule?`（默认 false）。
+- 默认只回 `id / name / school / type / term_id` —— 面板接口就这些，很快（~0.2s）。
+- `include_schedule: true` 会为每门课额外查一次 `mocTermDto`，补上
+  `start_time_ms` / `end_time_ms`。实测 **10 门课约 3 秒**（每门一次往返）。
+  取不到（学期已下线等）时两个字段为 `null`。
+- 用途：区分**进行中**和**已结束**的课程 —— 命令行选课时就是靠它显示
+  `2026-09-17 ~ 2027-01-21 [进行中]` / `[⚠ 已结束]`，用户不必再对照学期号。
+
 ## `list_term_units`
 
 - 入参：`course_id`、`term_id`，可选 `school_short_name`（拼 learn Referer）。

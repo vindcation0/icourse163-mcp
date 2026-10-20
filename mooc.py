@@ -1098,6 +1098,42 @@ def course_entry(course: dict) -> dict:
     }
 
 
+def course_label(course: dict) -> str:
+    """列表里显示**开课~结课时间 + 状态**，而不是学期号。
+
+    学期号（如 1488389457）对用户没有辨识度；时间能直接看出"这门课还在不在"，
+    顺便避开已经结束的课程 —— 那正是用户要的效果。
+    """
+    start = course.get("start_time_ms")
+    end = course.get("end_time_ms")
+    name = str(course.get("name", ""))
+    school = str(course.get("school", ""))
+    head = f"{name}（{school}）"
+
+    def fmt(ms: object) -> str:
+        try:
+            value = float(ms)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return "—"
+        return time.strftime("%Y-%m-%d", time.localtime(value / 1000))
+
+    if not start and not end:
+        return f"{head}  时间未知"
+    now_ms = time.time() * 1000
+    try:
+        starts = float(start) if start else None
+        ends = float(end) if end else None
+    except (TypeError, ValueError):
+        starts = ends = None
+    if starts is not None and now_ms < starts:
+        status = "未开始"
+    elif ends is not None and now_ms > ends:
+        status = "⚠ 已结束"
+    else:
+        status = "进行中"
+    return f"{head}  {fmt(start)} ~ {fmt(end)}  [{status}]"
+
+
 def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
     """选出**要跑的一组课程**（保持用户给的顺序）。
 
@@ -1105,7 +1141,8 @@ def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
     - 给了 `--course` / `--term`：沿用原来的筛选逻辑，取一个
     - 否则：交互式多选
     """
-    result = mcp.call("list_courses")
+    print("   正在查询课程时间……", flush=True)
+    result = mcp.call("list_courses", {"include_schedule": True})
     courses = [c for c in result.get("courses", []) if isinstance(c, dict)]
     if not courses:
         die("抱歉，还没有已选课程。确认登录无误、账号选对了。")
@@ -1125,10 +1162,7 @@ def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
         )
         return [{"course_id": course_id, "term_id": term_id, "school": school, "name": name}]
 
-    labels = [
-        f"{c.get('name', '')}（{c.get('school', '')}）学期 {c.get('term_id', '')}"
-        for c in courses
-    ]
+    labels = [course_label(c) for c in courses]
     picks = ask_multi_choice(
         "要跑哪些课程？（可多选）",
         labels,

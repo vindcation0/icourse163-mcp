@@ -228,9 +228,17 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
     {
       title: "List 已选课程",
       description: LIST_COURSES_DESCRIPTION,
+      inputSchema: {
+        include_schedule: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. true adds start_time_ms / end_time_ms per course by fetching mocTermDto once per course (about 1s for 10) — lets a caller tell running courses from ended ones.",
+          ),
+      },
     },
-    async () => {
-      const result = await listCourses(ports);
+    async (args) => {
+      const result = await listCourses(ports, { include_schedule: args.include_schedule });
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: { ...result },
