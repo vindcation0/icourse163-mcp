@@ -1,6 +1,6 @@
 # icourse163-mcp
 
-中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具。**推荐通过 AI agent 调用**：
+中国大学MOOC（[icourse163.org](https://www.icourse163.org)）的本机工具。：
 14 个 MCP 工具覆盖登录、刷课、读题、答题提交、单元作业、讨论区，外加**一条命令跑完整门课**。
 
 命令行入口（`mooc.py` / `mooc.exe`）**已经把全部能力都接进来了**（刷课、测验、作业、讨论、一键跑完），
@@ -15,7 +15,7 @@
 
 # 一、使用方式
 
-## 1. 推荐：通过 AI agent 调用（MCP）
+## 1. 通过 AI agent 调用（MCP）
 
 ### 1.1 挂载
 
