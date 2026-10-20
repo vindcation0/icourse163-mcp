@@ -24,11 +24,22 @@ export type CourseItem = {
    */
   start_time_ms?: number | null;
   end_time_ms?: number | null;
+  /** 课程总单元数。只有 `include_progress: true` 时有值。 */
+  units_total?: number | null;
+  /** 已完成单元数（completePercent >= 0.999 或 viewStatus 已完成）。 */
+  units_completed?: number | null;
 };
 
 export type ListCoursesArgs = {
   /** 为每门课额外查一次 `mocTermDto` 取开课/结课时间。默认 false。 */
   include_schedule?: boolean;
+  /**
+   * 同时返回单元总数与已完成数。默认 false。
+   *
+   * 与 `include_schedule` **共用同一次 `mocTermDto` 请求** —— 那个响应里本来就带着
+   * chapters/lessons/units，所以进度是顺带算出来的，不额外发请求。
+   */
+  include_progress?: boolean;
 };
 
 export type ListCoursesResult = {
@@ -37,6 +48,12 @@ export type ListCoursesResult = {
   courses: CourseItem[];
   errors: ToolError[];
 };
+
+const asRecord = (value: unknown): Record<string, unknown> | null =>
+  value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+const asArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
 
 export async function listCourses(
   ports?: Icourse163Ports,
@@ -83,8 +100,8 @@ export async function listCourses(
     term_id: course.term_id,
   }));
 
-  if (args.include_schedule === true) {
-    // 逐门课取一次 mocTermDto。读接口很轻（实测 50~100ms），10 门课约 1 秒。
+  if (args.include_schedule === true || args.include_progress === true) {
+    // 逐门课取一次 mocTermDto。读接口很轻（实测 50~100ms），10 门课约 3 秒。
     for (const item of courses) {
       try {
         const moc = await fetchMocTermDto({
@@ -96,11 +113,42 @@ export async function listCourses(
         const record = moc as unknown as Record<string, unknown> | null;
         const start = Number(record?.startTime);
         const end = Number(record?.endTime);
-        item.start_time_ms = Number.isFinite(start) ? start : null;
-        item.end_time_ms = Number.isFinite(end) ? end : null;
+        if (args.include_schedule === true) {
+          item.start_time_ms = Number.isFinite(start) ? start : null;
+          item.end_time_ms = Number.isFinite(end) ? end : null;
+        }
+        if (args.include_progress === true) {
+          // 同一个响应里就有单元，顺手数一遍，不额外发请求。
+          let total = 0;
+          let completed = 0;
+          for (const chapter of asArray(record?.chapters)) {
+            const ch = asRecord(chapter);
+            for (const lesson of asArray(ch?.lessons)) {
+              const ls = asRecord(lesson);
+              for (const unit of asArray(ls?.units)) {
+                const u = asRecord(unit);
+                if (u == null) continue;
+                total += 1;
+                const pct = Number(u.completePercent ?? 0);
+                const view = String(u.viewStatus ?? "");
+                if (pct >= 0.999 || view === "completed" || view === "5") {
+                  completed += 1;
+                }
+              }
+            }
+          }
+          item.units_total = total;
+          item.units_completed = completed;
+        }
       } catch {
-        item.start_time_ms = null;
-        item.end_time_ms = null;
+        if (args.include_schedule === true) {
+          item.start_time_ms = null;
+          item.end_time_ms = null;
+        }
+        if (args.include_progress === true) {
+          item.units_total = null;
+          item.units_completed = null;
+        }
       }
     }
   }

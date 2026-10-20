@@ -164,8 +164,10 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - `include_schedule: true` 会为每门课额外查一次 `mocTermDto`，补上
   `start_time_ms` / `end_time_ms`。实测 **10 门课约 3 秒**（每门一次往返）。
   取不到（学期已下线等）时两个字段为 `null`。
-- 用途：区分**进行中**和**已结束**的课程 —— 命令行选课时就是靠它显示
-  `2026-09-17 ~ 2027-01-21 [进行中]` / `[⚠ 已结束]`，用户不必再对照学期号。
+- `include_progress: true` 会再补 `units_total` / `units_completed`。**与 `include_schedule` 共用
+  同一次 `mocTermDto` 请求**（那个响应里就有 chapters/lessons/units），所以两个都要不额外花时间。
+- 用途：区分**进行中**和**已结束**的课程，并一眼看出还剩多少 —— 命令行选课时显示
+  `2026-09-17 ~ 2027-01-21 [进行中] 已完成 268/285`。
 
 ## `list_term_units`
 

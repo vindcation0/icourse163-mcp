@@ -1141,6 +1141,10 @@ def course_label(course: dict) -> str:
         return time.strftime("%Y-%m-%d", time.localtime(value / 1000))
 
     if not start and not end:
+        total = course.get("units_total")
+        done = course.get("units_completed")
+        if isinstance(total, int) and total > 0 and isinstance(done, int):
+            return f"{head}  时间未知  已完成 {done}/{total}"
         return f"{head}  时间未知"
     now_ms = time.time() * 1000
     try:
@@ -1154,7 +1158,13 @@ def course_label(course: dict) -> str:
         status = "⚠ 已结束"
     else:
         status = "进行中"
-    return f"{head}  {fmt(start)} ~ {fmt(end)}  [{status}]"
+    label = f"{head}  {fmt(start)} ~ {fmt(end)}  [{status}]"
+    total = course.get("units_total")
+    done = course.get("units_completed")
+    if isinstance(total, int) and total > 0 and isinstance(done, int):
+        mark = " ✅" if done >= total else ""
+        label += f"  已完成 {done}/{total}{mark}"
+    return label
 
 
 def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
@@ -1165,7 +1175,7 @@ def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
     - 否则：交互式多选
     """
     print("   正在查询课程时间……", flush=True)
-    result = mcp.call("list_courses", {"include_schedule": True})
+    result = mcp.call("list_courses", {"include_schedule": True, "include_progress": True})
     courses = [c for c in result.get("courses", []) if isinstance(c, dict)]
     if not courses:
         die("抱歉，还没有已选课程。确认登录无误、账号选对了。")

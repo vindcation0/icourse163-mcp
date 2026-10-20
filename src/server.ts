@@ -233,12 +233,21 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
           .boolean()
           .optional()
           .describe(
-            "Default false. true adds start_time_ms / end_time_ms per course by fetching mocTermDto once per course (about 1s for 10) — lets a caller tell running courses from ended ones.",
+            "Default false. true adds start_time_ms / end_time_ms per course (one mocTermDto call each, about 3s for 10 courses) — lets a caller tell running courses from ended ones.",
+          ),
+        include_progress: z
+          .boolean()
+          .optional()
+          .describe(
+            "Default false. true adds units_total / units_completed. Shares the same mocTermDto call as include_schedule, so asking for both costs the same as one.",
           ),
       },
     },
     async (args) => {
-      const result = await listCourses(ports, { include_schedule: args.include_schedule });
+      const result = await listCourses(ports, {
+        include_schedule: args.include_schedule,
+        include_progress: args.include_progress,
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(result) }],
         structuredContent: { ...result },
