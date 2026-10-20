@@ -1323,18 +1323,145 @@ def ask_yes(prompt: str) -> bool:
     return answer in ("y", "yes", "是", "确认")
 
 
+def _parse_tiku_text(raw: str) -> tuple[list[dict] | None, str]:
+    """校验题库配置文本。返回 (可用条目, 问题说明)；条目为 None 表示整体无效。
+
+    规则与 src/tiku.ts 的 parseTikuConfig 对齐：接受裸数组，也接受
+    {"answerers": [...]} / {"tiku": [...]}；每条必须有 url 和 handler。
+    """
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return None, f"不是合法 JSON（{exc}）"
+    if isinstance(data, list):
+        entries = data
+    elif isinstance(data, dict) and isinstance(data.get("answerers"), list):
+        entries = data["answerers"]
+    elif isinstance(data, dict) and isinstance(data.get("tiku"), list):
+        entries = data["tiku"]
+    else:
+        return None, '需要一个数组，或 {"answerers": [...]} / {"tiku": [...]}'
+    good: list[dict] = []
+    problems: list[str] = []
+    for index, item in enumerate(entries, start=1):
+        if not isinstance(item, dict):
+            problems.append(f"第 {index} 项不是对象")
+            continue
+        url = item.get("url")
+        handler = item.get("handler")
+        if not isinstance(url, str) or url.strip() == "":
+            problems.append(f"第 {index} 项缺 url")
+            continue
+        if not isinstance(handler, str) or handler.strip() == "":
+            problems.append(f"第 {index} 项缺 handler")
+            continue
+        good.append(item)
+    if not good:
+        detail = "；".join(problems) if problems else "列表是空的"
+        return None, f"没有可用的题库条目（{detail}）"
+    return good, "；".join(problems)
+
+
+def paste_tiku_config() -> None:
+    """让用户直接把题库 JSON 粘进终端，省得自己找配置文件。"""
+    path = tiku_path()
+    print("\n   把题库配置粘贴进来（JSON）。")
+    print("   一行粘完也行，多行也行；粘完输入单独一行 `.` 结束。输入 0 取消。")
+    print("   会先校验，不合格不会覆盖原有配置。\n")
+    lines: list[str] = []
+    while True:
+        try:
+            line = input("   ")
+        except UnicodeDecodeError:
+            # Windows 控制台的 stdin 是 GBK：粘贴 emoji 这类 GBK 表示不了的字符会在这里炸。
+            # 与其抛 traceback，不如说清楚怎么办。
+            print(f"\n{BAD} 粘贴的内容里有当前终端编码（{sys.stdin.encoding}）不支持的字符。")
+            print("   常见元凶是 emoji。请删掉它们重贴，或改用：")
+            print(f"   把 JSON 存成文件，然后设置环境变量 ICOURSE163_TIKU_FILE 指向它。")
+            return
+        except EOFError:
+            # 粘贴过程中被 EOF 打断（比如从管道喂输入）：把already拿到的东西校验一遍再走，
+            # 不能静默返回 —— 否则用户以为存上了，其实什么都没发生。
+            print()
+            break
+        stripped = line.strip()
+        if stripped == ".":
+            break
+        if stripped == "0" and not lines:
+            print("   已取消。")
+            return
+        lines.append(line)
+        parsed, _ = _parse_tiku_text("\n".join(lines))
+        if parsed is not None and not stripped.endswith(("[", "{", ",")):
+            break
+
+    text = "\n".join(lines).strip()
+    if text == "":
+        print("   没粘任何内容，已取消。")
+        return
+    entries, problem = _parse_tiku_text(text)
+    if entries is None:
+        print(f"{BAD} 配置无效：{problem}")
+        print("   原有配置没有改动。")
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(entries, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except OSError as exc:
+        print(f"{BAD} 写不进去：{exc}")
+        return
+    print(f"{OK} 已保存 {len(entries)} 个题库 → {path}")
+    for index, item in enumerate(entries, start=1):
+        label = item.get("name") or item.get("url")
+        print(f"     {index}. {label}")
+    if problem:
+        print(f"   注意：跳过的条目：{problem}")
+    print("   下次做题就会用它（不需要重启）。")
+
+
+def delete_tiku_config() -> None:
+    path = tiku_path()
+    if not path.exists():
+        print("   本来就没有题库配置。")
+        return
+    confirm = ask_choice("确认删除题库配置？", [f"删除 {path}"], back_label="取消")
+    if confirm != 0:
+        return
+    try:
+        path.unlink()
+        print(f"{OK} 已删除题库配置。")
+    except OSError as exc:
+        print(f"{BAD} 删不掉：{exc}")
+
+
 def settings_tiku_menu() -> None:
-    """题库配置：只做状态检查与路径说明（配置文件本身不进菜单编辑）。"""
+    """题库配置：在菜单里直接粘贴 / 替换 / 删除，不用自己找文件。"""
     while True:
         ok, detail = tiku_status()
-        print(f"\n   题库配置：{'✅ ' if ok else '❌ '}{detail}")
-        print(f"   路径：{tiku_path()}")
-        if not ok:
-            print("\n   用法：把题库配置（JSON 数组，兼容 OCS AnswererWrapper）写进上面这个文件。")
-            print("   也可以用环境变量 ICOURSE163_TIKU_FILE 指向别处。")
-        picked = ask_choice("题库", ["重新检查", "返回"], back_label="返回")
-        if picked is None or picked == 1:
+        picked = ask_choice(
+            "题库配置",
+            [
+                "粘贴 / 替换题库配置（直接粘 JSON）",
+                "删除题库配置",
+            ],
+            extra=(
+                f"\n   当前：{'✅ ' if ok else '❌ '}{detail}"
+                f"\n   路径：{tiku_path()}"
+                "\n   提示：题库只用于章节测验这类不泄露答案的卷子；"
+                "\n         随堂测试用试卷自带答案，不需要题库。"
+            ),
+            back_label="返回",
+        )
+        if picked is None:
             return
+        if picked == 0:
+            paste_tiku_config()
+        elif picked == 1:
+            delete_tiku_config()
 
 
 def cmd_login(args: argparse.Namespace) -> None:
