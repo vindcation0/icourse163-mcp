@@ -1366,8 +1366,7 @@ def paste_tiku_config() -> None:
     """让用户直接把题库 JSON 粘进终端，省得自己找配置文件。"""
     path = tiku_path()
     print("\n   把题库配置粘贴进来（JSON）。")
-    print("   一行粘完也行，多行也行；粘完输入单独一行 `.` 结束。输入 0 取消。")
-    print("   会先校验，不合格不会覆盖原有配置。\n")
+    print("   0. 取消")
     lines: list[str] = []
     while True:
         try:
