@@ -760,15 +760,11 @@ def main_actions(args: argparse.Namespace) -> list[tuple[str, object]]:
     没有这一项，他就只能干看着了。
     """
     return [
-        ("一键跑完整门课（可多选课程，依次执行）", lambda: cmd_course(args)),
-        ("做题（挑一个测验，选答题方式）", lambda: cmd_quiz(args)),
-        ("写作业（逐题输入答案）", lambda: cmd_homework(args)),
-        ("回复讨论区", lambda: cmd_discuss(args)),
-        ("开始刷课（只刷视频/文档）", lambda: cmd_auto(args)),
-        ("查看状态（登录还有效吗）", cmd_status),
-        ("列出我的课程", cmd_courses),
-        ("设置（视频播放 / 密码显示）", settings_menu),
+        ("一键跑完整门课（可多选课程）", lambda: cmd_course(args)),
+        ("写单元作业（逐题输入答案）", lambda: cmd_homework(args)),
+        ("设置（视频 / 密码 / 题库）", settings_menu),
         ("重新登录（换账号，或登录失效时用）", lambda: cmd_login(args)),
+        ("查看状态 / 我的课程", cmd_view),
     ]
 
 
@@ -1046,6 +1042,33 @@ def cmd_discuss(args: argparse.Namespace) -> None:
             print(f"   {mark} {str(unit.get('name', ''))[:30]}  {status}")
 
 
+COURSE_PARTS: list[tuple[str, list[str]]] = [
+    ("全部（刷课 + 随堂测试 + 讨论 + 章节测验）", ["media", "quiz", "discussion", "chapter_quiz"]),
+    ("只刷视频/文档（不动测验和讨论）", ["media"]),
+    ("只做题（随堂测试 + 章节测验）", ["quiz", "chapter_quiz"]),
+    ("只回讨论区", ["discussion"]),
+]
+
+
+def ask_parts() -> list[str] | None:
+    """跑之前问一句要跑哪些部分 —— 这样"只刷课"不必单独占一个菜单项。"""
+    picked = ask_choice(
+        "要跑哪些部分？",
+        [label for label, _ in COURSE_PARTS],
+        back_label="取消",
+    )
+    if picked is None:
+        return None
+    return COURSE_PARTS[picked][1]
+
+
+def cmd_view() -> None:
+    """菜单里的"查看状态 / 我的课程"：先体检，再列课。"""
+    cmd_status()
+    print()
+    cmd_courses()
+
+
 def ask_multi_choice(
     title: str,
     options: list[str],
@@ -1174,7 +1197,7 @@ def pick_courses(mcp: Mcp, args: argparse.Namespace) -> list[dict]:
     return [course_entry(courses[i]) for i in picks]
 
 
-def run_one_course(mcp: Mcp, course: dict, args: argparse.Namespace) -> dict:
+def run_one_course(mcp: Mcp, course: dict, args: argparse.Namespace, parts: list[str]) -> dict:
     """跑一门课，逐项打印进度，返回这门课的统计。"""
     kind_labels = {
         "media": "刷课",
@@ -1192,6 +1215,7 @@ def run_one_course(mcp: Mcp, course: dict, args: argparse.Namespace) -> dict:
         "school_short_name": school,
         "dry_run": True,
         "verbose": True,
+        "include": parts,
     }
     if args.answer_mode:
         plan_args["answer_mode"] = args.answer_mode
@@ -1321,6 +1345,10 @@ def cmd_course(args: argparse.Namespace) -> None:
     所以做法是：一次选好一组课程，然后串行跑完，每门课结束打一行汇总。
     """
     summaries: list[dict] = []
+    parts = getattr(args, "include", None) or ask_parts()
+    if parts is None:
+        print("   已取消。")
+        return
     with Mcp(timeout=args.timeout or 300.0) as mcp:
         check_session(mcp)
         courses = pick_courses(mcp, args)
@@ -1335,7 +1363,7 @@ def cmd_course(args: argparse.Namespace) -> None:
             if args.dry_run is False and not ask_yes(f"开始跑第 {index} 门？这会真的写进度"):
                 print("   已跳过。")
                 continue
-            summary = run_one_course(mcp, course, args)
+            summary = run_one_course(mcp, course, args, parts)
             summaries.append(summary)
 
     if args.dry_run:
@@ -1721,6 +1749,8 @@ study / auto 还能加：
   --answer-mode agent   你自己答：脚本把题目给你，逐题输入
   --all                 讨论区：一次回复全部未完成的讨论
   --content "一句话"     讨论回复内容（默认 "1"）
+  --include media,quiz  只跑其中几类（media/quiz/discussion/chapter_quiz），
+                        不给则会问"要跑哪些部分"
   --dry-run             只预览，不提交、不写入
 
 题库配置：写进 ~/.config/icourse163-mcp/tiku.json
@@ -1753,6 +1783,11 @@ def main() -> None:
     parser.add_argument("--transport", default="rpc", choices=["rpc", "auto", "playwright"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--all", action="store_true", help="讨论区：一次回复全部未完成的讨论")
+    parser.add_argument(
+        "--include",
+        default=None,
+        help="course：只跑其中几类，逗号分隔（media,quiz,discussion,chapter_quiz）；不填则交互式询问",
+    )
     parser.add_argument(
         "--all-courses",
         action="store_true",
@@ -1797,6 +1832,12 @@ def main() -> None:
     if args.help:
         print(USAGE)
         return
+
+    # --include 逗号分隔 → 列表；给了就跳过"要跑哪些部分"的提问
+    if getattr(args, "include", None):
+        args.include = [part.strip() for part in str(args.include).split(",") if part.strip()]
+    else:
+        args.include = None
 
     # 必须在任何分支之前解析设置：双击路径（command is None）也会用到 password_visible
     apply_settings(args)
