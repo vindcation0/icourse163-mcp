@@ -361,9 +361,9 @@ export function createIcourse163McpServer(ports?: Icourse163Ports): McpServer {
         term_id: z.string().describe("Term id"),
         school_short_name: z.string().optional().describe("School short name, e.g. CUPES"),
         include: z
-          .array(z.enum(["media", "quiz", "discussion"]))
+          .array(z.enum(["media", "quiz", "discussion", "chapter_quiz"]))
           .optional()
-          .describe("Which parts to run; default all three"),
+          .describe("Which parts to run; default all of them"),
         dry_run: z.boolean().optional().describe("Default false. true only lists what it would do."),
         discussion_content: z.string().optional().describe('Reply text for discussions; default "1"'),
         delay_ms: z.number().optional().describe("Pause between units (default 800)"),

@@ -233,12 +233,19 @@ class Mcp:
         structured = result.get("structuredContent")
         if isinstance(structured, dict):
             return structured
+        texts: list[str] = []
         for block in result.get("content", []):
             if block.get("type") == "text":
+                texts.append(block.get("text", ""))
                 try:
                     return json.loads(block["text"])
                 except json.JSONDecodeError:
                     continue
+        # 工具报错（例如参数校验失败）时没有 structuredContent，上面会落到这里。
+        # 以前这里返回 {}，界面就显示成"什么都没有要做" —— 把错误伪装成了空结果。
+        if result.get("isError"):
+            detail = " ".join(t for t in texts if t)[:300]
+            raise RuntimeError(f"工具 {name} 调用失败：{detail}")
         return {}
 
     def close(self) -> None:
