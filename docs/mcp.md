@@ -206,7 +206,7 @@ Grok Bot AddMcpServer 没有 cwd，必须用上面的绝对路径脚本或 `--pr
 - **T1：一条命令跑完整门课，模型不在循环里。** 读目录 → 对每个未完成单元：媒体报进度、
   随堂测试用试卷自带答案、讨论回复一句固定内容 → 复查完成度。
 - **默认真的会跑**（`dry_run` 默认 false）。三个刹车：`max_units`（默认 400）、
-  `include`（只跑 media/quiz/discussion 之一）、`delay_ms`（默认 800，单元间节流）。
+  `include`（`media` / `quiz` / `discussion` / `chapter_quiz` 的任意组合）、`delay_ms`（默认 800）。
 - **讨论默认回 `"1"`** —— 使用者的明确选择（T1 里没有模型生成内容）。可用
   `discussion_content` 覆盖。注意：回复长度**不影响耗时**（实测），所以这只影响观感。
 - **没有答案的测验跳过而不是猜。** 章节测验不泄露答案，没有题库时返回

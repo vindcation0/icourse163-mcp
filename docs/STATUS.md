@@ -1,21 +1,59 @@
 # 现状报告：给新会话 / 其他 agent 的接手入口
 
-> **读这一份就够上手**。写于 2026-10-18，基于当天的大量实测（不是推测）。
+> **读这一份就够上手**。写于 2026-10-18，基于当天的大量实测（不是推测）；
+> 2026-10-20 做了一次阶段收尾更新（见 §0.1）。
 > 细节别处有：优先级与代价见 [ROADMAP](ROADMAP.md)，逆向硬事实与踩坑史见 [HANDOFF](HANDOFF.md)，
-> 工具契约见 [mcp.md](mcp.md)，登录细节见 [login.md](login.md)。
+> 工具契约见 [mcp.md](mcp.md)，登录细节见 [login.md](login.md)，并发边界见 [concurrency.md](concurrency.md)。
+
+---
+
+## 0.1 阶段小结（2026-10-20，项目暂告一段落）
+
+**做完了什么**
+
+| 能力 | 状态 |
+|---|---|
+| 登录 | ✅ CLI + `login` MCP 工具（弹有头浏览器，密码不进模型） |
+| 刷课（视频/文档） | ✅ 签名 RPC，~1.4 秒/单元 |
+| 随堂测试 | ✅ 零题库，**57/57 完成**（答案就在试卷里） |
+| 章节测验 | ✅ 可做，需题库；言溪实测命中 85–90% |
+| 单元作业 | ✅ 读题/草稿/提交，答案由人/agent 写 |
+| 讨论区 | ✅ **57/57 完成**（回复即完成任务点） |
+| 一键跑完 | ✅ `study_course` / `mooc.py course`，模型不在循环里 |
+| 题库配置 | ✅ 可在 `mooc.py settings → 3` 里直接粘贴 |
+
+**课程侧结果**：账号下 **10 门课程-学期全部 100% 完成**（含 3 个已结束的旧学期）。
+收尾时待办 143 个 = 测验 142 + 考试 1，**作业 0**（已全部处理）。
+
+**这一阶段新增的 MCP 工具**：`login`、`study_course`、`solve_homework`、`list_discussion_units`、
+`reply_discussion`、`solve_quiz` —— 共 14 个。
+
+**清理**：删掉 9 个一次性脚本（依赖 Antigravity 的绝对路径），补上 `scripts/run-mcp.cmd`，
+`.gitignore` 补 `scratch/` 与 `mcp_config.json`。
+
+**还明确没做的**
+
+- 考试正式提交：代码已实现，**默认关闭**，且从未真实提交过（`allowSwitchPageCount=0` 的反作弊没研究）
+- 章节测验分数：142 个待办测验大多在别的课程，需要题库继续跑
+- 互评作业、证书、学习统计、OJ 编程题：完全没碰
+- 多课程并行：**实测不可行**，见 [concurrency.md](concurrency.md)（写入并发上限 ≈2）
+
+**下阶段的入口**：修 D2 已做；建议先跑 `python mooc.py course` 看剩下 142 个测验的分布，
+再决定要不要补题库/继续做章节测验。
 
 ---
 
 ## 0. 30 秒摘要
 
 **这是什么**：中国大学MOOC（icourse163.org）的本机工具，两条入口共用同一个引擎 ——
-`mooc.py`/`mooc.exe`（给人用，编号菜单）和 stdio **MCP 服务器**（给 agent 用，14 个工具）。
+`mooc.py`/`mooc.exe`（给人用，五项菜单）和 stdio **MCP 服务器**（给 agent 用，14 个工具）。
 
 **一句话现状**：
-> **登录、刷课、读题、答题提交、讨论区回复 —— 全部可用且已实测；除 `study_unit` 的浏览器回退外都是纯 HTTP。**
+> **登录、刷课、读题、答题提交、单元作业、讨论区回复、一键跑完整门课 —— 全部可用且已实测。**
+> **除 `study_unit` 的浏览器回退外都是纯 HTTP；账号下 10 门课程已 100% 完成。**
 > 登录有两条路：CLI（`mooc.py login` / `npm run login`）和 MCP **`login` 工具**（弹有头浏览器，不收密码参数）。
 > 讨论区要的浏览器会话由 `login` 工具**自动写入**，实测 `followedStatus` 变 `AVAILABLE`，不需要手抄。
-> 讨论区工具已实现。考试提交**默认关闭**，需显式 `allow_exam: true`。
+> 考试提交**默认关闭**，需显式 `allow_exam: true`。
 > 剩下的是工作量，不是未知。
 
 **最重要的五条结论**（都是实测打出来的，之前的文档写错过）：
@@ -37,15 +75,16 @@
 | 登录 | 纯 HTTP（URS：SM4+RSA+VDF） | `mooc.py login` / exe 首次运行 / MCP `login`（有头浏览器） | CLI ~4 秒；`login` 工具 ~15 秒并顺带写 `browser-session` |
 | 刷视频/文档 | **签名 RPC** | `mooc.py auto` / MCP `study_unit` | ~1.4 秒/单元 |
 | 分块上报（可选） | 签名 RPC | `--chunk 60` | 337s 单元 → 6 段，153 秒 |
-| 列待办 | 纯 HTTP | MCP `list_todos` | 159 个（测验 137 / 作业 21 / 考试 1） |
-| 列课程/课件 | 纯 HTTP | `mooc.py courses/units`、MCP | 8 门课 |
+| 列待办 | 纯 HTTP | MCP `list_todos` | 阶段收尾时 143 个（测验 142 / 考试 1，作业 0） |
+| 列课程/课件 | 纯 HTTP | `mooc.py courses/units`、MCP | 10 门课；`include_progress` 可顺带给出 x/y 进度 |
 | **读试卷** | **纯 HTTP** | MCP `get_homework` | 作业 0.5s、测验 3.0s |
 | **提交答案** | **纯 HTTP** | MCP `submit_homework` | **8/8 满分**，1.3 秒 |
 | **随堂测试全自动** | 纯 HTTP | MCP `solve_quiz` | 试卷自带答案，**57/57 已完成** |
-| **讨论区回复** | 纯 HTTP（需浏览器会话，`login` 工具自动生成） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，1/57 已验证 |
+| **讨论区回复** | 纯 HTTP（需浏览器会话，`login` 工具自动生成） | MCP `list_discussion_units` / `reply_discussion` | 回复即完成任务点，**57/57 已完成** |
 | **单元作业** | 纯 HTTP | MCP `solve_homework` | 正式提交实测成功（226 字答案），**不影响单元完成度** |
+| **一键跑完整门课** | 纯 HTTP | MCP `study_course` / `mooc.py course` | 46 单元 63.7 秒；285 单元课程一次调用 |
 | 会话体检 | 纯 HTTP | `mooc.py status` / MCP `session_status` | ~2 秒 |
-| 设置（视频/密码） | 本地 JSON | `mooc.py settings` | 13 组桩测试 |
+| 设置（视频/密码/**题库**） | 本地 JSON | `mooc.py settings` | 题库可直接在菜单里粘贴配置 |
 | 打包 exe + Release | — | `python scripts/build-exe.py` | v0.1.0 已发布，53MB zip |
 
 **14 个 MCP 工具里 11 个是纯 HTTP**；`study_unit` 可能碰浏览器（见 §5 危险动作），
