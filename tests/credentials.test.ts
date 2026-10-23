@@ -13,7 +13,10 @@ import {
 } from "../src/cookie";
 import {
   createFileCredentialStore,
+  createKeyringCredentialStore,
   defaultSessionFilePath,
+  KEYCHAIN_MAX_CREDENTIAL_BYTES,
+  type KeychainEntry,
 } from "../src/credentials";
 
 const SESSION = "NTESSTUDYSI=test-session";
@@ -139,5 +142,143 @@ describe("file credential store", () => {
     await writeFile(path, "  \n", "utf8");
     const store = createFileCredentialStore({ path });
     assert.equal(await store.getCookie(), null);
+  });
+});
+
+// The Windows keychain caps a credential blob at 2560 bytes and the library stores the
+// password as UTF-16, so a full icourse163 cookie (1700-2900 chars) can never be written
+// there. Reads prefer the keychain, so a surviving older entry silently shadows the file:
+// `login` reports success while every catalog tool sees an empty account.
+describe("keychain store", () => {
+  const SHORT_COOKIE = "NTESSTUDYSI=short-session; STUDY_INFO=short-info";
+  // 1512 chars -> 3024 bytes as UTF-16, over the 2560-byte blob limit.
+  const LONG_COOKIE = `NTESSTUDYSI=${"a".repeat(1500)}`;
+  const STALE_COOKIE = "NTESSTUDYSI=stale-session";
+
+  function fakeKeychain(options: {
+    stored?: string | null;
+    failSet?: boolean;
+    failDelete?: boolean;
+  } = {}) {
+    const calls: string[] = [];
+    let stored: string | null = options.stored ?? null;
+    const entry: KeychainEntry = {
+      async getPassword() {
+        calls.push("get");
+        return stored;
+      },
+      async setPassword(value: string) {
+        calls.push("set");
+        if (options.failSet === true) {
+          throw new Error(
+            "Value of 'password encoded as UTF-16' is longer than the platform limit of 2560 chars",
+          );
+        }
+        stored = value;
+      },
+      async deletePassword() {
+        calls.push("delete");
+        if (options.failDelete === true) {
+          throw new Error("keychain unavailable");
+        }
+        stored = null;
+      },
+    };
+    return { entry, calls, peek: () => stored };
+  }
+
+  /** logStoreError writes to stderr; the failure tests would otherwise spam the run. */
+  function muted<T>(run: () => Promise<T>): Promise<T> {
+    const original = console.error;
+    console.error = () => undefined;
+    return run().finally(() => {
+      console.error = original;
+    });
+  }
+
+  async function fileStore(name: string) {
+    const dir = await mkdtemp(join(tmpdir(), `icourse163-${name}-`));
+    const path = join(dir, "session");
+    return { path, store: createFileCredentialStore({ path }) };
+  }
+
+  test("the oversize threshold really is under the long-cookie length", () => {
+    assert.ok(LONG_COOKIE.length * 2 > KEYCHAIN_MAX_CREDENTIAL_BYTES);
+    assert.ok(SHORT_COOKIE.length * 2 < KEYCHAIN_MAX_CREDENTIAL_BYTES);
+  });
+
+  test("a failed keychain write drops the stale entry so the file takes effect", async () => {
+    const file = await fileStore("shadow");
+    const keychain = fakeKeychain({ stored: STALE_COOKIE, failSet: true });
+    const store = createKeyringCredentialStore({
+      fallback: file.store,
+      entry: keychain.entry,
+    });
+
+    await muted(() => store.setCookie(SHORT_COOKIE));
+
+    assert.ok(keychain.calls.includes("delete"), "stale keychain value must be removed");
+    assert.equal(keychain.peek(), null);
+    assert.equal(await file.store.getCookie(), SHORT_COOKIE);
+    // The whole point: what getCookie() returns is the cookie just written.
+    assert.equal(await store.getCookie(), SHORT_COOKIE);
+  });
+
+  test("an over-limit cookie never attempts the keychain write", async () => {
+    const file = await fileStore("oversize");
+    const keychain = fakeKeychain({ stored: STALE_COOKIE });
+    const store = createKeyringCredentialStore({
+      fallback: file.store,
+      entry: keychain.entry,
+    });
+
+    await store.setCookie(LONG_COOKIE);
+
+    assert.equal(keychain.calls.includes("set"), false, "write would be rejected anyway");
+    assert.equal(keychain.peek(), null, "older value must not survive");
+    assert.equal(await file.store.getCookie(), LONG_COOKIE);
+  });
+
+  test("a cookie that fits stays in the keychain and leaves no file behind", async () => {
+    const file = await fileStore("fits");
+    const keychain = fakeKeychain();
+    const store = createKeyringCredentialStore({
+      fallback: file.store,
+      entry: keychain.entry,
+    });
+
+    await store.setCookie(SHORT_COOKIE);
+
+    assert.equal(keychain.peek(), SHORT_COOKIE);
+    assert.equal(await file.store.getCookie(), null);
+    assert.equal(await store.getCookie(), SHORT_COOKIE);
+  });
+
+  test("a failed delete does not fail the write that follows", async () => {
+    const file = await fileStore("delete-fails");
+    const keychain = fakeKeychain({
+      stored: STALE_COOKIE,
+      failSet: true,
+      failDelete: true,
+    });
+    const store = createKeyringCredentialStore({
+      fallback: file.store,
+      entry: keychain.entry,
+    });
+
+    await muted(() => store.setCookie(SHORT_COOKIE));
+    assert.equal(await file.store.getCookie(), SHORT_COOKIE);
+  });
+
+  test("without a file store an over-limit cookie fails loudly", async () => {
+    const store = createKeyringCredentialStore({ entry: fakeKeychain().entry });
+    await assert.rejects(() => store.setCookie(LONG_COOKIE), /2560/);
+  });
+
+  test("without a file store a keychain write failure still throws", async () => {
+    const store = createKeyringCredentialStore({
+      entry: fakeKeychain({ failSet: true }).entry,
+    });
+    await muted(() => assert.rejects(() => store.setCookie(SHORT_COOKIE), /keychain/));
   });
 });

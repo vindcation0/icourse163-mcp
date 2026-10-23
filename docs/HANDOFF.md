@@ -243,9 +243,11 @@ npm run login:http --silent -- -u <手机号> --channel phone
    → 得到 `STUDY_INFO`/`STUDY_SESS`/`STUDY_PERSIST`；再 `GET /member/login.htm` → 得到
    `NTESSTUDYSI`。已实现为 `ursLandSession()`。
 
-3. **存储坑**：落地后完整 cookie 约 1703 字符，**超过 Windows 凭据管理器 2560 字节上限** →
-   keychain 写入失败回退到文件，而 `getCookie` 优先读 keychain → 读到过期的短值，
-   表现为"登录成功但工具报 auth_expired"。现在只保留 7 个必要 cookie（约 990 字符）。
+3. **存储坑（已修，见 ADR 0005）**：落地后完整 cookie 约 1700–2900 字符，**超过 Windows 凭据管理器
+   2560 字节上限**（按 UTF-16 存）→ keychain 写入失败回退到文件，而 `getCookie` 优先读 keychain →
+   读到过期的短值，表现为"登录成功但 0 门课"。现在 `src/credentials.ts` 超限时跳过 keychain，并在
+   回退到文件前删掉 keychain 里的旧值；`npm run check:creds` 可自检。URS 路径仍只保留 7 个必要
+   cookie（约 990 字符），但那是优化，不再是绕开手段。
 
 ### 为什么这次能解决
 

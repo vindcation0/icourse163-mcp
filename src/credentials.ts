@@ -10,6 +10,22 @@ import type { CredentialStore } from "./list-todos";
 export const KEYRING_SERVICE = "icourse163.mcp";
 export const KEYRING_ACCOUNT = "cookie";
 
+/**
+ * Windows Credential Manager caps one credential blob at 2560 bytes (5 * 512), and
+ * `@napi-rs/keyring` stores the password as UTF-16, so the practical ceiling for an
+ * ASCII cookie header is 1280 characters. A full icourse163 session (7-14 cookies) is
+ * 1700-2900 characters, i.e. it never fits.
+ */
+export const KEYCHAIN_MAX_CREDENTIAL_BYTES = 2560;
+
+/** The three calls this module needs from the OS keychain; injectable for tests. */
+export type KeychainEntry = {
+  getPassword(): Promise<string | null | undefined>;
+  setPassword(password: string): Promise<void>;
+  /** `@napi-rs/keyring` resolves `true`/`false` here rather than `void`. */
+  deletePassword(): Promise<boolean | void>;
+};
+
 const FILE_MODE = 0o600;
 const DIR_MODE = 0o700;
 
@@ -85,12 +101,16 @@ export function createKeyringCredentialStore(options: {
   fallback?: WritableCredentialStore;
   service?: string;
   account?: string;
+  /** Injection seam; production always talks to the real OS keychain. */
+  entry?: KeychainEntry;
 } = {}): WritableCredentialStore {
   const fallback = options.fallback;
-  const entry = new AsyncEntry(
-    options.service ?? KEYRING_SERVICE,
-    options.account ?? KEYRING_ACCOUNT,
-  );
+  const entry: KeychainEntry =
+    options.entry ??
+    new AsyncEntry(
+      options.service ?? KEYRING_SERVICE,
+      options.account ?? KEYRING_ACCOUNT,
+    );
 
   return {
     async getCookie() {
@@ -108,22 +128,35 @@ export function createKeyringCredentialStore(options: {
       return null;
     },
     async setCookie(cookie: string) {
-      try {
-        await entry.setPassword(cookie);
-        return;
-      } catch (error) {
-        logStoreError(
-          "Failed to write icourse163 cookie to keychain; using file fallback if available",
-          error,
-        );
-        if (fallback == null) {
-          const detail = error instanceof Error ? error.message : String(error);
-          throw new Error(`Failed to write icourse163 cookie to keychain: ${detail}`, {
-            cause: error,
-          });
+      if (!exceedsKeychainLimit(cookie)) {
+        try {
+          await entry.setPassword(cookie);
+          return;
+        } catch (error) {
+          logStoreError(
+            "Failed to write icourse163 cookie to keychain; using the file store",
+            error,
+          );
+          if (fallback == null) {
+            const detail = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to write icourse163 cookie to keychain: ${detail}`, {
+              cause: error,
+            });
+          }
         }
-        await fallback.setCookie(cookie);
       }
+      if (fallback == null) {
+        throw new Error(
+          `icourse163 cookie is ${utf16ByteLength(cookie)} bytes encoded as UTF-16, over the ` +
+            `keychain limit of ${KEYCHAIN_MAX_CREDENTIAL_BYTES} bytes, and no file store is configured.`,
+        );
+      }
+      // The keychain write did not land. Drop any older value before persisting the file:
+      // getCookie() reads the keychain first, so a surviving stale entry would shadow the
+      // fresh cookie forever — `login` keeps reporting success while every catalog tool
+      // sees an empty account. See docs/adr/0005-urs-http-login.md.
+      await dropKeychainValue(entry);
+      await fallback.setCookie(cookie);
     },
     async clearCookie() {
       try {
@@ -136,6 +169,49 @@ export function createKeyringCredentialStore(options: {
       }
     },
   };
+}
+
+function utf16ByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf16le");
+}
+
+/**
+ * Whether writing this cookie to the OS keychain is doomed on this platform.
+ *
+ * Only the Windows limit is modelled: it is the one that actually bites here, and the
+ * guard is a cheap pre-check, not a portability claim. Short cookies still take the
+ * normal write-and-handle-failure path, so other platforms keep keychain storage.
+ */
+function exceedsKeychainLimit(cookie: string): boolean {
+  return utf16ByteLength(cookie) > KEYCHAIN_MAX_CREDENTIAL_BYTES;
+}
+
+/**
+ * Remove a keychain value that must not outlive a skipped or failed keychain write.
+ *
+ * Best-effort by design: the file write that follows is the real fix, and a failure to
+ * delete must not turn that into an error. A shadow that survives this is reported by
+ * `npm run check:creds`.
+ */
+async function dropKeychainValue(entry: KeychainEntry): Promise<void> {
+  let existing: string | null | undefined;
+  try {
+    existing = await entry.getPassword();
+  } catch (error) {
+    logStoreError("Failed to inspect the previous icourse163 keychain entry", error);
+    return;
+  }
+  if (existing == null || existing === "") {
+    return;
+  }
+  try {
+    await entry.deletePassword();
+  } catch (error) {
+    logStoreError(
+      "Failed to clear the previous icourse163 keychain entry; it may shadow the file store",
+      error,
+    );
+  }
 }
 
 export function createLocalCredentialStore(options: {

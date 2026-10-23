@@ -6,12 +6,18 @@
 
 ## 存哪儿
 
-优先 OS 钥匙串（`@napi-rs/keyring`，service `icourse163.mcp` / account `cookie`）。钥匙串不可用时落到 `0600` 文件：
+优先 OS 钥匙串（`@napi-rs/keyring`，service `icourse163.mcp` / account `cookie`）。钥匙串不可用、
+或 cookie 超过钥匙串上限时落到 `0600` 文件：
 
 - `$XDG_CONFIG_HOME/icourse163-mcp/session`
 - 若未设 `XDG_CONFIG_HOME`：`~/.config/icourse163-mcp/session`
 
 本地文件安全性低于钥匙串。不要把该文件提交进 git。不保存密码。
+
+> **Windows 上的长度限制**：凭据管理器单条上限 2560 字节，而 `@napi-rs/keyring` 按 UTF-16 存，
+> 所以 ASCII 超过 1280 字符的 cookie 一定进不了钥匙串，会存到文件。超过上限时**不再尝试**钥匙串，
+> 并会先删掉那里的旧值 —— 否则旧值会一直遮蔽新会话，表现为 `LOGIN_OK` 但所有工具报 0 门课。
+> 用 `npm run check:creds` 自检（只读，只打印长度与指纹，不打印 cookie）。
 
 ## Cookie 粘贴（可靠兜底）
 

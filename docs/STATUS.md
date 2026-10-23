@@ -221,11 +221,16 @@
 
 实测：**读卷不消耗次数**（读前后 `usedTryCount` 都是 0/10）。
 
-### 4.7 凭据存储有**两个真相来源**
+### 4.7 凭据存储曾有**两个真相来源**（2026-10-22 已修）
 
-- keychain 里是裁剪后的 **990 字符 / 7 个** cookie（能塞进 2560 字节上限）
-- 文件里是更早的 **1703 字符 / 17 个**
-- `getCookie()` **优先读 keychain** → 直接读文件的探针会拿到另一个值，导致结论不可比
+- **旧状态**：keychain 里是裁剪后的 **990 字符** cookie，文件里是更早的 **1703 字符**那份；
+  `getCookie()` **优先读 keychain** → 实际生效的是 keychain 里的旧值，而直接读文件的探针拿到另一个值，
+  结论不可比，所有目录类工具还会看到 0 门课。
+- **根因**：完整 cookie 超过 Windows 凭据管理器 2560 字节（UTF-16）上限 → keychain 写失败回退文件，
+  但旧条目没被删除，于是永久遮蔽。`login` 照样打印 `LOGIN_OK`。
+- **修法**：超限时跳过 keychain + 回退前删除旧值，保证 keychain 要么最新要么为空。
+  存量机器下一次 `login` 自动恢复。
+- **自检**：`npm run check:creds`（只读，打印长度/指纹/生效来源；退出码 1 = 仍在遮蔽）。
 
 ---
 
@@ -335,7 +340,7 @@
 C:\Users\vindacation\Documents\deepseek-harness\default-workspace\icourse163-mcp
 
 # 关键路径
-~/.config/icourse163-mcp/session        # 会话（keychain 优先）
+~/.config/icourse163-mcp/session        # 会话（≤1280 字符进 keychain，否则落文件；check:creds 可查）
 ~/.config/icourse163-mcp/settings.json  # 设置（只存改过的项）
 ~/.icourse163-mcp/chrome-profile        # 浏览器登录用的持久化 profile
 
@@ -344,6 +349,7 @@ python mooc.py            # 无参数 = 首次直接登录，之后给编号菜�
 python mooc.py status
 python mooc.py auto       # 刷课（--transport 默认 rpc，绝不回退浏览器）
 python mooc.py settings
+npm run check:creds        # 凭据自检：是否被 keychain 旧值遮蔽
 
 # agent 用
 npm start --silent        # stdio MCP 服务器（14 个工具）

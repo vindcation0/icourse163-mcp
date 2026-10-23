@@ -47,15 +47,26 @@ GET https://www.icourse163.org/member/login.htm
   → 种下 NTESSTUDYSI（所有 RPC 工具都需要的 API 令牌）
 ```
 
-### 存储上的一个坑
+### 存储上的一个坑（2026-10-22 已修）
 
-落地后的完整 cookie 约 1703 字符，**超过 Windows 凭据管理器 2560 字节的上限**，于是 keychain
-写入失败、回退到文件，而 `getCookie` 优先读 keychain —— 结果读到一个更短的**过期**值，
-表面上"登录成功"但工具报 `auth_expired`。
+落地后的完整 cookie 约 1700–2900 字符，**超过 Windows 凭据管理器 2560 字节的上限**（`@napi-rs/keyring`
+按 UTF-16 存密码，所以 ASCII 超过 1280 字符就超）。于是 keychain 写入失败、回退到文件 —— 而
+`getCookie` 优先读 keychain，只要那里还留着一条更早、更短的 cookie，它就会**永久遮蔽**文件里刚写下的
+新会话：`login` 打印 `LOGIN_OK`，所有目录类工具却看到 0 门课，`session_status` 再把它报成 stale。
 
-解法：落地后只保留 icourse163 真正用到的 7 个 cookie（`NTESSTUDYSI`、`STUDY_INFO`、`STUDY_SESS`、
-`STUDY_PERSIST`、`EDUWEBDEVICE`、`NETEASE_WDA_UID`、`NTES_YD_PASSPORT`），约 990 字符，
-舒适地落在上限内。URS 那些 `.163.com` cookie 对 icourse163.org 毫无意义。
+修法在 `src/credentials.ts`，两条：
+
+1. 超过上限的 cookie **不再尝试** keychain（写了必然失败，还会白打一条错误日志）；
+2. 真正要回退到文件之前，**先删掉 keychain 里的旧值** —— 遮蔽的前提就是这条旧值活着。
+
+合起来保证「keychain 要么是最新的、要么是空的」，读优先级从此不再有歧义。存量机器在下一次 `login`
+时自动恢复，不需要迁移脚本。
+
+小 cookie 仍然有价值（只保留 icourse163 真正用到的 7 个 cookie 约 990 字符），但那已经是优化，不再是
+绕开这个坑的手段。
+
+`npm run check:creds` 是只读自检：打印两个存储的长度、SHA-256 指纹、最终生效的是哪个，以及是否处于
+遮蔽状态（退出码 1）。不输出 cookie 值、token 或密码。
 
 ### 实测结果
 

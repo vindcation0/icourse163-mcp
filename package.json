@@ -8,6 +8,7 @@
     "login": "node --import tsx src/login-cli.ts",
     "login:http": "node --import tsx src/urs-login-cli.ts",
     "check:rpc": "node --import tsx src/check-rpc.ts",
+    "check:creds": "node --import tsx src/check-creds.ts",
     "test": "ICOURSE163_DISALLOW_LIVE_PLAYWRIGHT=1 tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
